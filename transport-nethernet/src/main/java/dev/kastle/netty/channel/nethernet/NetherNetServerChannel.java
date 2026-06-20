@@ -12,6 +12,7 @@ import dev.kastle.webrtc.RTCBundlePolicy;
 import dev.kastle.webrtc.RTCConfiguration;
 import dev.kastle.webrtc.RTCDataChannel;
 import dev.kastle.webrtc.RTCIceCandidate;
+import dev.kastle.webrtc.RTCIceGatheringState;
 import dev.kastle.webrtc.RTCIceServer;
 import dev.kastle.webrtc.RTCPeerConnection;
 import dev.kastle.webrtc.RTCPeerConnectionState;
@@ -95,6 +96,7 @@ public class NetherNetServerChannel extends AbstractServerChannel {
 
         ServerPeerConnectionObserver observer = new ServerPeerConnectionObserver(connectionId, remoteNetworkId);
         RTCPeerConnection pc = factory.createPeerConnection(rtcConfig, observer);
+        observer.setPeerConnection(pc);
 
         NetherNetChildChannel child = new NetherNetChildChannel(this, pc, new InetSocketAddress(0), localAddress);
         observer.setChildChannel(child);
@@ -152,13 +154,19 @@ public class NetherNetServerChannel extends AbstractServerChannel {
                                 );
                                 pipeline().fireChannelRead(child);
                             }
-                            @Override public void onFailure(String error) { log.error("SetLocalDesc failed: {}", error); }
+                            @Override public void onFailure(String error) {
+                                log.error("SetLocalDesc failed: {}", error);
+                            }
                         });
                     }
-                    @Override public void onFailure(String error) { log.error("CreateAnswer failed: {}", error); }
+                    @Override public void onFailure(String error) {
+                        log.error("CreateAnswer failed: {}", error);
+                    }
                 });
             }
-            @Override public void onFailure(String error) { log.error("SetRemoteDesc failed: {}", error); }
+            @Override public void onFailure(String error) {
+                log.error("SetRemoteDesc failed: {}", error);
+            }
         });
     }
 
@@ -175,6 +183,9 @@ public class NetherNetServerChannel extends AbstractServerChannel {
 
         private ScheduledFuture<?> handshakeTimeout;
 
+        private RTCPeerConnection peerConnection;
+        private volatile boolean fullSdpSent = false;
+
         public ServerPeerConnectionObserver(long connectionId, String remoteNetworkId) {
             this.connectionId = connectionId;
             this.remoteNetworkId = remoteNetworkId;
@@ -187,6 +198,10 @@ public class NetherNetServerChannel extends AbstractServerChannel {
         public void setChildChannel(NetherNetChildChannel child) {
             this.child = child;
             checkDataChannels();
+        }
+
+        public void setPeerConnection(RTCPeerConnection pc) {
+            this.peerConnection = pc;
         }
 
         @Override
@@ -249,6 +264,22 @@ public class NetherNetServerChannel extends AbstractServerChannel {
                     child.pipeline().fireChannelActive();
                 }
             }
+        }
+
+        @Override
+        public void onIceGatheringChange(RTCIceGatheringState state) {
+            if (state != RTCIceGatheringState.COMPLETE || fullSdpSent) return;
+
+            RTCSessionDescription local = peerConnection.getLocalDescription();
+            if (local == null) {
+                log.warn("Gathering complete for {} but local description is null", Long.toUnsignedString(connectionId));
+                return;
+            }
+
+            fullSdpSent = true;
+
+            log.trace("Sending full SDP (with gathered candidates) for {}", Long.toUnsignedString(connectionId));
+            signaling.sendFullSdp(remoteNetworkId, local.sdp);
         }
     }
 
