@@ -1,10 +1,15 @@
 package dev.kastle.netty.channel.nethernet.signaling;
 
+import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
+import dev.kastle.netty.util.nethernet.Identity;
+import dev.kastle.netty.util.nethernet.IdentityUtils;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+import org.jose4j.jwt.JwtClaims;
+import org.jose4j.jwt.consumer.JwtContext;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -99,6 +104,18 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
         String sdpOffer = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
 
         log.trace("Received sdp offer: " + sdpOffer);
+
+        try {
+            JwtClaims claims = IdentityUtils.validateSdp(sdpOffer);
+
+            // TODO Some form of callback if people want to do filtering of xuid etc at this point?
+            log.debug("Identity is valid: " + claims.getClaimValueAsString("xname") + " (" + claims.getClaimValueAsString("xid") + ")");
+        } catch (Exception e) {
+            log.error("Identity validation failed", e);
+            exchange.sendResponseHeaders(401, -1);
+            exchange.close();
+            return;
+        }
 
         newConnectionHandler.onConnect(Long.parseLong(networkId), networkId, sdpOffer);
 
