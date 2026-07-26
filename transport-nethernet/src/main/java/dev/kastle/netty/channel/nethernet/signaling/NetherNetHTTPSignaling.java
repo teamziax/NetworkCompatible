@@ -1,15 +1,15 @@
 package dev.kastle.netty.channel.nethernet.signaling;
 
-import com.google.gson.Gson;
+import com.sun.net.httpserver.Filter;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
-import dev.kastle.netty.util.nethernet.Identity;
 import dev.kastle.netty.util.nethernet.IdentityUtils;
+import dev.kastle.netty.util.logs.LoggingHttpFilter;
+import dev.kastle.netty.util.nethernet.ServerIdentity;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.jose4j.jwt.JwtClaims;
-import org.jose4j.jwt.consumer.JwtContext;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 
 public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
 
@@ -30,20 +31,25 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
 
     private HttpsServer server;
     private SSLContext ssl;
+    private ServerIdentity serverIdentity;
 
     private NetherNetServerSignaling.NewConnectionHandler newConnectionHandler;
     private Map<String, String> sdpAnswers = new HashMap<>();
 
-    public NetherNetHTTPSignaling(File keystore) {
-        this(keystore, "");
+    private Random random;
+
+    public NetherNetHTTPSignaling(File httpsKeystore, File identityKeystore) {
+        this(httpsKeystore, "", identityKeystore, "");
     }
 
-    public NetherNetHTTPSignaling(File keystore, String password) {
+    public NetherNetHTTPSignaling(File httpsKeystore, String httpsPassword, File identityKeystore, String identityPassword) {
+        this.random = new Random();
+
         try {
-            char[] passwordChars = password.toCharArray();
+            char[] passwordChars = httpsPassword.toCharArray();
 
             KeyStore ks = KeyStore.getInstance("PKCS12");
-            try (FileInputStream fis = new FileInputStream("keystore.p12")) {
+            try (FileInputStream fis = new FileInputStream(httpsKeystore)) {
                 ks.load(fis, passwordChars);
             }
 
@@ -55,6 +61,12 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
         } catch (Exception ex) {
             ex.printStackTrace();
         }
+
+        try {
+            this.serverIdentity = ServerIdentity.fromKeystore(identityKeystore, identityPassword);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
     }
 
     @Override
@@ -63,7 +75,7 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
         try {
             server = HttpsServer.create((InetSocketAddress) localAddress, 0);
             server.setHttpsConfigurator(new HttpsConfigurator(ssl));
-            server.createContext("/v1/join", this::handleJoin);
+            server.createContext("/v1/join", this::handleJoin).getFilters().add(new LoggingHttpFilter(log));
             server.setExecutor(null); // creates a default executor
             server.start();
         } catch (Exception e) {
@@ -72,8 +84,6 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     }
 
     private void handleJoin(HttpExchange exchange) throws IOException {
-        log.debug("Received join request: " + exchange.getRequestMethod() + " " + exchange.getRequestURI());
-
         if (exchange.getRequestURI().getPath().equals("/v1/join")) {
             if (exchange.getRequestMethod().equals("GET")) {
                 exchange.sendResponseHeaders(200, 0);
@@ -94,8 +104,7 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
         String networkId = exchange.getRequestURI().getPath().substring("/v1/join/".length());
 
         // Reject empty, or anything with a further path segment
-        if (networkId.isEmpty() || networkId.indexOf('/') >= 0)
-        {
+        if (networkId.isEmpty() || networkId.indexOf('/') >= 0) {
             exchange.sendResponseHeaders(404, -1);
             exchange.close();
             return;
@@ -117,7 +126,8 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
             return;
         }
 
-        newConnectionHandler.onConnect(Long.parseLong(networkId), networkId, sdpOffer);
+        // We cant use the network ID as the connection ID as they can be out of the bounds of a long
+        newConnectionHandler.onConnect(random.nextLong(), networkId, sdpOffer);
 
         // Wait for sdpAnswers to contain the answer for this networkId
         // TODO Timeout
@@ -126,6 +136,7 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                log.error("Thread interrupted while waiting for SDP answer", e);
                 exchange.sendResponseHeaders(500, 0);
                 exchange.close();
                 return;
@@ -135,11 +146,24 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
         String sdpAnswer = sdpAnswers.get(networkId);
         log.trace("Received SDP answer: " + sdpAnswer);
 
+        // Sign the answer with the server identity
+        String signedAnswer;
+        try {
+            signedAnswer = serverIdentity.augmentAnswer(sdpAnswer);
+            log.trace("Signed SDP answer: " + signedAnswer);
+        } catch (Exception e) {
+            log.error("Failed to attach server identity to answer", e);
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+            return;
+        }
+
         log.debug("Sending SDP answer");
 
+        byte[] body = signedAnswer.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/sdp");
-        exchange.sendResponseHeaders(200, sdpAnswer.length());
-        exchange.getResponseBody().write(sdpAnswer.getBytes());
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
         exchange.close();
     }
 

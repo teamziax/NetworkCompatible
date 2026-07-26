@@ -36,4 +36,12 @@ public record Identity(Idp idp, Assertion assertion) {
     public record Idp(String domain, String protocol) {}
 
     public record Assertion(String token, String fingerprints) {}
+
+    public String toJson() {
+        return gson.toJson(new Raw(idp, gson.toJson(assertion)));
+    }
+
+    public String toBase64() {
+        return Base64.getEncoder().encodeToString(toJson().getBytes(StandardCharsets.UTF_8));
+    }
 }

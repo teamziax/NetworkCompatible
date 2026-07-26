@@ -34,10 +34,26 @@ public class IdentityUtils {
         .setExpectedIssuer("https://authorization.franchise.minecraft-services.net/")
         .build();
 
+    /**
+     * Validate the given identity against the known jwt signer
+     *
+     * @param identity The identity to validate
+     * @return The JWT context if the identity is valid
+     * @throws InvalidJwtException If the identity is invalid
+     */
     public static JwtContext validateIdentity(Identity identity) throws InvalidJwtException {
         return JWT_CONSUMER.process(identity.assertion().token()); // TODO Take into account the idp in the identity
     }
 
+    /**
+     * Validate the SDP offer against the embedded identity and known jwt signer
+     * This is designed into the spec to prevent MITM
+     *
+     * @param sdpOffer The SDP offer to validate
+     * @return The JWT claims if the SDP offer is valid
+     * @throws JoseException If there is an error processing the SDP offer
+     * @throws InvalidJwtException If the SDP offer contains an invalid JWT
+     */
     public static JwtClaims validateSdp(String sdpOffer) throws JoseException, InvalidJwtException {
         // Extract the identity
         Identity identity = Identity.fromSdpOffer(sdpOffer);
@@ -61,18 +77,14 @@ public class IdentityUtils {
             JsonWebSignature jws = new JsonWebSignature();
             jws.setCompactSerialization(detachedJws);
 
-            // Derive the key type from the JWS header
-            String alg = jws.getAlgorithmHeaderValue();
-            String keyType = keyAlgorithmFor(alg);
-
             // cpk is base64, decode it and parse as a public key
             byte[] der = Base64.getDecoder().decode(claims.getClaimValueAsString("cpk"));
-            PublicKey cpkKey = KeyFactory.getInstance(keyType).generatePublic(new X509EncodedKeySpec(der));
+            PublicKey cpkKey = KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(der));
 
             // Set the JWS properties so we can verify
             jws.setKey(cpkKey);
             jws.setPayload(fingerprints);
-            jws.setAlgorithmConstraints(new AlgorithmConstraints(ConstraintType.PERMIT, alg));
+            jws.setAlgorithmConstraints(new AlgorithmConstraints(ConstraintType.PERMIT, AlgorithmIdentifiers.ECDSA_USING_P384_CURVE_AND_SHA384));
 
             if (!jws.verifySignature()) {
                 throw new JoseException("Fingerprint signature mismatch");
@@ -84,26 +96,13 @@ public class IdentityUtils {
         return claims;
     }
 
-    private static String keyAlgorithmFor(String jwsAlg) throws JoseException {
-        return switch (jwsAlg) { // No idea if this is complete or even all needed, just guessed at common ones
-            case AlgorithmIdentifiers.ECDSA_USING_P256_CURVE_AND_SHA256,
-                 AlgorithmIdentifiers.ECDSA_USING_P384_CURVE_AND_SHA384,
-                 AlgorithmIdentifiers.ECDSA_USING_P521_CURVE_AND_SHA512 -> "EC";
-
-            case AlgorithmIdentifiers.RSA_USING_SHA256,
-                 AlgorithmIdentifiers.RSA_USING_SHA384,
-                 AlgorithmIdentifiers.RSA_USING_SHA512,
-                 AlgorithmIdentifiers.RSA_PSS_USING_SHA256,
-                 AlgorithmIdentifiers.RSA_PSS_USING_SHA384,
-                 AlgorithmIdentifiers.RSA_PSS_USING_SHA512 -> "RSA";
-
-            case AlgorithmIdentifiers.EDDSA -> "EdDSA";
-
-            default -> throw new JoseException("Unsupported fingerprint alg: " + jwsAlg);
-        };
-    }
-
-    private static String getCanonicalFingerprintJson(String sdpOffer) {
+    /**
+     * Get the canonical fingerprint JSON from the SDP offer
+     *
+     * @param sdpOffer The SDP offer to extract fingerprints from
+     * @return The canonical fingerprint JSON
+     */
+    public static String getCanonicalFingerprintJson(String sdpOffer) {
         String prefix = "a=fingerprint:";
         return Arrays.stream(sdpOffer.split("\n"))
             .filter(line -> line.startsWith(prefix))
