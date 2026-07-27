@@ -1,7 +1,7 @@
 package dev.kastle.netty.channel.nethernet.signaling;
 
-import com.sun.net.httpserver.Filter;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
 import dev.kastle.netty.util.nethernet.IdentityUtils;
@@ -25,11 +25,16 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 
+/**
+ * This class implements a signaling server using HTTP(S) for the NetherNet protocol.
+ * <p>
+ * Follows <a href="https://github.com/Mojang/bedrock-protocol-docs/blob/7330880ab78ef001cad0b9cdfedb3aa3eaa6d4af/NetherNetOnboardingGuide.md">...</a>
+ */
 public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
 
     private final InternalLogger log = InternalLoggerFactory.getInstance(getClass());
 
-    private HttpsServer server;
+    private HttpServer server;
     private SSLContext ssl;
     private ServerIdentity serverIdentity;
 
@@ -42,30 +47,50 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
         this(httpsKeystore, "", identityKeystore, "");
     }
 
+    /**
+     * Creates an HTTPS signalling server, backed by one keystore for the TLS
+     * listener and another for the server identity used to sign SDP answers.
+     * <p>
+     * Both must be PKCS12 files. The identity key must be EC P-384, and its certificate
+     * CN is surfaced as the identity domain, so set it to something recognisable.
+     * Generate one with:
+     * <pre>{@code
+     * keytool -genkeypair -alias identity -keyalg EC -groupname secp384r1 \
+     *         -storetype PKCS12 -keystore identity.p12 -storepass changeit \
+     *         -dname "CN=Your Server" -validity 3650
+     * }</pre>
+     *
+     * @param httpsKeystore PKCS12 keystore holding the TLS certificate and key
+     * @param httpsPassword Password for {@code httpsKeystore}, or "" if unprotected
+     * @param identityKeystore PKCS12 keystore holding the EC P-384 identity key
+     * @param identityPassword Password for {@code identityKeystore}, or "" if unprotected
+     */
     public NetherNetHTTPSignaling(File httpsKeystore, String httpsPassword, File identityKeystore, String identityPassword) {
         this.random = new Random();
 
         try {
-            char[] passwordChars = httpsPassword.toCharArray();
+            if (httpsKeystore != null) {
+                char[] passwordChars = httpsPassword.toCharArray();
 
-            KeyStore ks = KeyStore.getInstance("PKCS12");
-            try (FileInputStream fis = new FileInputStream(httpsKeystore)) {
-                ks.load(fis, passwordChars);
+                KeyStore ks = KeyStore.getInstance("PKCS12");
+                try (FileInputStream fis = new FileInputStream(httpsKeystore)) {
+                    ks.load(fis, passwordChars);
+                }
+
+                KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+                kmf.init(ks, passwordChars);
+
+                ssl = SSLContext.getInstance("TLS");
+                ssl.init(kmf.getKeyManagers(), null, null);
             }
-
-            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-            kmf.init(ks, passwordChars);
-
-            ssl = SSLContext.getInstance("TLS");
-            ssl.init(kmf.getKeyManagers(), null, null);
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("Error loading https keystore: " + ex.getMessage(), ex);
         }
 
         try {
             this.serverIdentity = ServerIdentity.fromKeystore(identityKeystore, identityPassword);
         } catch (Exception ex) {
-            ex.printStackTrace();
+            log.error("Error loading identity keystore: " + ex.getMessage(), ex);
         }
     }
 
@@ -73,8 +98,15 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     public void bind(SocketAddress localAddress) throws ConnectException {
         if (!(localAddress instanceof InetSocketAddress)) throw new IllegalArgumentException("Unsupported address type");
         try {
-            server = HttpsServer.create((InetSocketAddress) localAddress, 0);
-            server.setHttpsConfigurator(new HttpsConfigurator(ssl));
+            if (ssl != null) {
+                server = HttpsServer.create((InetSocketAddress) localAddress, 0);
+                ((HttpsServer) server).setHttpsConfigurator(new HttpsConfigurator(ssl));
+            } else {
+                // TODO Find a way of making the client accept non-TLS connections
+                // The spec says this is possible
+                server = HttpServer.create((InetSocketAddress) localAddress, 0);
+            }
+
             server.createContext("/v1/join", this::handleJoin).getFilters().add(new LoggingHttpFilter(log));
             server.setExecutor(null); // creates a default executor
             server.start();
