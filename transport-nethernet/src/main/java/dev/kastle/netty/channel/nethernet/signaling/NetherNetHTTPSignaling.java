@@ -43,8 +43,12 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
 
     private Random random;
 
-    public NetherNetHTTPSignaling(File httpsKeystore, File identityKeystore) {
-        this(httpsKeystore, "", identityKeystore, "");
+    public NetherNetHTTPSignaling(File identityKeystore, String identityPassword) {
+        this(identityKeystore, identityPassword, null, "");
+    }
+
+    public NetherNetHTTPSignaling(File identityKeystore, File httpsKeystore) {
+        this(identityKeystore, "", httpsKeystore, "");
     }
 
     /**
@@ -60,12 +64,12 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
      *         -dname "CN=Your Server" -validity 3650
      * }</pre>
      *
-     * @param httpsKeystore PKCS12 keystore holding the TLS certificate and key
-     * @param httpsPassword Password for {@code httpsKeystore}, or "" if unprotected
      * @param identityKeystore PKCS12 keystore holding the EC P-384 identity key
      * @param identityPassword Password for {@code identityKeystore}, or "" if unprotected
+     * @param httpsKeystore PKCS12 keystore holding the TLS certificate and key
+     * @param httpsPassword Password for {@code httpsKeystore}, or "" if unprotected
      */
-    public NetherNetHTTPSignaling(File httpsKeystore, String httpsPassword, File identityKeystore, String identityPassword) {
+    public NetherNetHTTPSignaling(File identityKeystore, String identityPassword, File httpsKeystore, String httpsPassword) {
         this.random = new Random();
 
         try {
