@@ -1,5 +1,6 @@
 package dev.kastle.netty.channel.nethernet.signaling;
 
+import dev.kastle.netty.util.http.HttpLoggingHandler;
 import dev.kastle.netty.util.http.TlsRejectingHandler;
 import dev.kastle.netty.util.nethernet.IdentityUtils;
 import dev.kastle.netty.util.nethernet.ServerIdentity;
@@ -7,17 +8,15 @@ import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFactory;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoop;
 import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -30,7 +29,6 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.FutureListener;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.ScheduledFuture;
@@ -41,12 +39,13 @@ import org.jose4j.jwt.JwtClaims;
 import javax.net.ssl.KeyManagerFactory;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.nio.channels.ServerSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
@@ -124,14 +123,24 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
 
     @Override
     public void bind(SocketAddress localAddress, EventLoop eventLoop) throws ConnectException {
-        if (!(localAddress instanceof InetSocketAddress))
+        if (!(localAddress instanceof InetSocketAddress)) {
             throw new IllegalArgumentException("Unsupported address type");
+        }
 
-        // Setup a new server bootstrap for http using the existing event loop
+        // Bind the listening socket ourselves so a failure throws correctly
+        ServerSocketChannel javaChannel;
+        try {
+            javaChannel = ServerSocketChannel.open();
+            javaChannel.configureBlocking(false);
+            javaChannel.bind(localAddress, 128);
+        } catch (IOException e) {
+            throw new ConnectException("Failed to bind HTTP signaling to " + localAddress + ": " + e.getMessage());
+        }
+
+        // Setup a new server bootstrap for http using the existing event loop and channel
         ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(eventLoop)
-            .channel(NioServerSocketChannel.class)
-            .option(ChannelOption.SO_BACKLOG, 128)
+            .channelFactory((ChannelFactory<NioServerSocketChannel>) () -> new NioServerSocketChannel(javaChannel))
             .childHandler(new ChannelInitializer<>() {
                 @Override
                 protected void initChannel(Channel ch) {
@@ -145,16 +154,16 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
 
                     p.addLast(new HttpServerCodec());
                     p.addLast(new HttpObjectAggregator(8 * 1024));
+                    p.addLast(new HttpLoggingHandler(log));
                     p.addLast(new SignalingHandler());
                 }
             });
 
-        // Bind the server to the specified address and add a listener to handle success/failure
-        ChannelFuture bindFuture = bootstrap.bind(localAddress);
-        serverChannel = bindFuture.channel();
-        bindFuture.addListener((ChannelFutureListener) future -> {
+        ChannelFuture regFuture = bootstrap.register();
+        serverChannel = regFuture.channel();
+        regFuture.addListener((ChannelFutureListener) future -> {
             if (!future.isSuccess()) {
-                log.error("Failed to bind HTTP signaling to " + localAddress, future.cause());
+                log.error("Failed to register HTTP signaling channel", future.cause());
                 future.channel().close();
             }
         });
