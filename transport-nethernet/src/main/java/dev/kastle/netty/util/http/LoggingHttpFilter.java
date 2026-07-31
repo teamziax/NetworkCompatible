@@ -1,4 +1,4 @@
-package dev.kastle.netty.util.logs;
+package dev.kastle.netty.util.http;
 
 import com.sun.net.httpserver.Filter;
 import com.sun.net.httpserver.HttpExchange;

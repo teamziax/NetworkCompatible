@@ -73,7 +73,7 @@ public class NetherNetServerChannel extends AbstractServerChannel {
             acceptConnection(connectionId, offerSdp, remoteNetworkId);
         });
 
-        this.signaling.bind(localAddress);
+        this.signaling.bind(localAddress, eventLoop());
     }
 
     public void acceptConnection(long connectionId, String offerSdp, String remoteNetworkId) {

@@ -1,31 +1,57 @@
 package dev.kastle.netty.channel.nethernet.signaling;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsServer;
+import dev.kastle.netty.util.http.TlsRejectingHandler;
 import dev.kastle.netty.util.nethernet.IdentityUtils;
-import dev.kastle.netty.util.logs.LoggingHttpFilter;
 import dev.kastle.netty.util.nethernet.ServerIdentity;
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoop;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.ByteToMessageDecoder;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.codec.http.QueryStringDecoder;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.SslHandler;
+import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.Promise;
+import io.netty.util.concurrent.ScheduledFuture;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.jose4j.jwt.JwtClaims;
 
 import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * This class implements a signaling server using HTTP(S) for the NetherNet protocol.
@@ -33,17 +59,16 @@ import java.util.concurrent.TimeUnit;
  * Follows <a href="https://github.com/Mojang/bedrock-protocol-docs/blob/7330880ab78ef001cad0b9cdfedb3aa3eaa6d4af/NetherNetOnboardingGuide.md">...</a>
  */
 public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
-
     private final InternalLogger log = InternalLoggerFactory.getInstance(getClass());
 
-    private HttpServer server;
-    private SSLContext ssl;
+    private final Random random = new Random();
+    private final Map<String, Promise<String>> pendingAnswers = new ConcurrentHashMap<>();
+
+    private SslContext sslContext;
     private ServerIdentity serverIdentity;
+    private NewConnectionHandler newConnectionHandler;
 
-    private NetherNetServerSignaling.NewConnectionHandler newConnectionHandler;
-    private Map<String, CompletableFuture<String>> sdpAnswers = new ConcurrentHashMap<>();
-
-    private Random random;
+    private Channel serverChannel;
 
     public NetherNetHTTPSignaling(File identityKeystore, String identityPassword) {
         this(identityKeystore, identityPassword, null, "");
@@ -68,14 +93,12 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
      *
      * @param identityKeystore PKCS12 keystore holding the EC P-384 identity key
      * @param identityPassword Password for {@code identityKeystore}, or "" if unprotected
-     * @param httpsKeystore PKCS12 keystore holding the TLS certificate and key, or null for plaintext
-     * @param httpsPassword Password for {@code httpsKeystore}, or "" if unprotected
+     * @param httpsKeystore    PKCS12 keystore holding the TLS certificate and key, or null for plaintext
+     * @param httpsPassword    Password for {@code httpsKeystore}, or "" if unprotected
      */
     public NetherNetHTTPSignaling(File identityKeystore, String identityPassword, File httpsKeystore, String httpsPassword) {
-        this.random = new Random();
-
-        try {
-            if (httpsKeystore != null) {
+        if (httpsKeystore != null) {
+            try {
                 char[] passwordChars = httpsPassword.toCharArray();
 
                 KeyStore ks = KeyStore.getInstance("PKCS12");
@@ -86,11 +109,10 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
                 KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
                 kmf.init(ks, passwordChars);
 
-                ssl = SSLContext.getInstance("TLS");
-                ssl.init(kmf.getKeyManagers(), null, null);
+                this.sslContext = SslContextBuilder.forServer(kmf).build();
+            } catch (Exception ex) {
+                log.error("Error loading https keystore: " + ex.getMessage(), ex);
             }
-        } catch (Exception ex) {
-            log.error("Error loading https keystore: " + ex.getMessage(), ex);
         }
 
         try {
@@ -101,109 +123,151 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     }
 
     @Override
-    public void bind(SocketAddress localAddress) throws ConnectException {
-        if (!(localAddress instanceof InetSocketAddress)) throw new IllegalArgumentException("Unsupported address type");
-        try {
-            if (ssl != null) {
-                server = HttpsServer.create((InetSocketAddress) localAddress, 0);
-                ((HttpsServer) server).setHttpsConfigurator(new HttpsConfigurator(ssl));
-            } else {
-                // TODO Find a way of making the client accept non-TLS connections
-                // The spec says this is possible
-                server = HttpServer.create((InetSocketAddress) localAddress, 0);
+    public void bind(SocketAddress localAddress, EventLoop eventLoop) throws ConnectException {
+        if (!(localAddress instanceof InetSocketAddress))
+            throw new IllegalArgumentException("Unsupported address type");
+
+        // Setup a new server bootstrap for http using the existing event loop
+        ServerBootstrap bootstrap = new ServerBootstrap();
+        bootstrap.group(eventLoop)
+            .channel(NioServerSocketChannel.class)
+            .option(ChannelOption.SO_BACKLOG, 128)
+            .childHandler(new ChannelInitializer<>() {
+                @Override
+                protected void initChannel(Channel ch) {
+                    ChannelPipeline p = ch.pipeline();
+                    // Handle ssl or drop it
+                    if (sslContext != null) {
+                        p.addLast(sslContext.newHandler(ch.alloc()));
+                    } else {
+                        p.addLast(new TlsRejectingHandler());
+                    }
+
+                    p.addLast(new HttpServerCodec());
+                    p.addLast(new HttpObjectAggregator(8 * 1024));
+                    p.addLast(new SignalingHandler());
+                }
+            });
+
+        // Bind the server to the specified address and add a listener to handle success/failure
+        ChannelFuture bindFuture = bootstrap.bind(localAddress);
+        serverChannel = bindFuture.channel();
+        bindFuture.addListener((ChannelFutureListener) future -> {
+            if (!future.isSuccess()) {
+                log.error("Failed to bind HTTP signaling to " + localAddress, future.cause());
+                future.channel().close();
+            }
+        });
+    }
+
+    private class SignalingHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+        @Override
+        protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
+            if (req.decoderResult().isFailure()) {
+                respondEmptyWithStatus(ctx, HttpResponseStatus.BAD_REQUEST);
+                return;
             }
 
-            server.createContext("/v1/join", this::handleJoin).getFilters().add(new LoggingHttpFilter(log));
-            server.setExecutor(null); // creates a default executor
-            server.start();
-        } catch (Exception e) {
-            throw new ConnectException("Failed to bind to address: " + localAddress + ". Error: " + e.getMessage());
+            String path = new QueryStringDecoder(req.uri()).path();
+            HttpMethod method = req.method();
+
+            // Respond to the status check
+            if (path.equals("/v1/join")) {
+                respondEmptyWithStatus(ctx, HttpMethod.GET.equals(method) ? HttpResponseStatus.OK : HttpResponseStatus.METHOD_NOT_ALLOWED);
+                return;
+            }
+
+            // Only continue if the path is /v1/join/<networkId>
+            if (!path.startsWith("/v1/join/")) {
+                respondEmptyWithStatus(ctx, HttpResponseStatus.NOT_FOUND);
+                return;
+            }
+
+            // Only continue if this is a post request
+            if (!HttpMethod.POST.equals(method)) {
+                respondEmptyWithStatus(ctx, HttpResponseStatus.METHOD_NOT_ALLOWED);
+                return;
+            }
+
+            String networkId = path.substring("/v1/join/".length());
+
+            // Reject empty, or anything with a further path segment
+            if (networkId.isEmpty() || networkId.indexOf('/') >= 0) {
+                respondEmptyWithStatus(ctx, HttpResponseStatus.NOT_FOUND);
+                return;
+            }
+
+            String sdpOffer = req.content().toString(StandardCharsets.UTF_8);
+            log.trace("Received sdp offer: " + sdpOffer);
+
+            try {
+                JwtClaims claims = IdentityUtils.validateSdp(sdpOffer);
+
+                // TODO Some form of callback if people want to do filtering of xuid etc at this point?
+                log.debug("Identity is valid: " + claims.getClaimValueAsString("xname") + " (" + claims.getClaimValueAsString("xid") + ")");
+            } catch (Exception e) {
+                log.error("Identity validation failed", e);
+                respondEmptyWithStatus(ctx, HttpResponseStatus.UNAUTHORIZED);
+                return;
+            }
+
+            // Register the pending answer before firing the callback so a fast answer isn't missed.
+            Promise<String> answer = ctx.executor().newPromise();
+            pendingAnswers.put(networkId, answer);
+
+            // Cancel the answer promise if we have waited 30s
+            ScheduledFuture<?> timeout = ctx.executor().schedule(() -> {
+                answer.tryFailure(new TimeoutException("Timed out waiting for SDP answer"));
+            }, 30, TimeUnit.SECONDS);
+
+            answer.addListener((FutureListener<String>) future -> {
+                pendingAnswers.remove(networkId, answer);
+                timeout.cancel(false);
+
+                if (!future.isSuccess()) {
+                    log.error("No SDP answer for " + networkId, future.cause());
+                    respondEmptyWithStatus(ctx, HttpResponseStatus.GATEWAY_TIMEOUT);
+                    return;
+                }
+
+                String sdpAnswer = future.getNow();
+                log.trace("Received SDP answer: " + sdpAnswer);
+
+                // Sign the answer with the server identity
+                String signedAnswer;
+                try {
+                    signedAnswer = serverIdentity.augmentAnswer(sdpAnswer);
+                    log.trace("Signed SDP answer: " + signedAnswer);
+                } catch (Exception e) {
+                    log.error("Failed to attach server identity to answer", e);
+                    respondEmptyWithStatus(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR);
+                    return;
+                }
+
+                log.debug("Sending SDP answer");
+
+                ByteBuf body = Unpooled.wrappedBuffer(signedAnswer.getBytes(StandardCharsets.UTF_8));
+                FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, body);
+                response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/sdp");
+                response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, body.readableBytes());
+                ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+            });
+
+            // We cant use the network ID as the connection ID as they can be out of the bounds of a long
+            newConnectionHandler.onConnect(random.nextLong(), networkId, sdpOffer);
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+            log.error("Signaling handler error", cause);
+            ctx.close();
         }
     }
 
-    private void handleJoin(HttpExchange exchange) throws IOException {
-        if (exchange.getRequestURI().getPath().equals("/v1/join")) {
-            if (exchange.getRequestMethod().equals("GET")) {
-                exchange.sendResponseHeaders(200, -1);
-            } else {
-                exchange.sendResponseHeaders(405, -1);
-            }
-
-            exchange.close();
-            return;
-        }
-
-        if (!exchange.getRequestMethod().equals("POST")) {
-            exchange.sendResponseHeaders(405, -1);
-            exchange.close();
-            return;
-        }
-
-        String networkId = exchange.getRequestURI().getPath().substring("/v1/join/".length());
-
-        // Reject empty, or anything with a further path segment
-        if (networkId.isEmpty() || networkId.indexOf('/') >= 0) {
-            exchange.sendResponseHeaders(404, -1);
-            exchange.close();
-            return;
-        }
-
-        String sdpOffer = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-
-        log.trace("Received sdp offer: " + sdpOffer);
-
-        try {
-            JwtClaims claims = IdentityUtils.validateSdp(sdpOffer);
-
-            // TODO Some form of callback if people want to do filtering of xuid etc at this point?
-            log.debug("Identity is valid: " + claims.getClaimValueAsString("xname") + " (" + claims.getClaimValueAsString("xid") + ")");
-        } catch (Exception e) {
-            log.error("Identity validation failed", e);
-            exchange.sendResponseHeaders(401, -1);
-            exchange.close();
-            return;
-        }
-
-        // Register the pending answer before firing the callback so a fast answer isn't missed.
-        CompletableFuture<String> answerFuture = new CompletableFuture<>();
-        sdpAnswers.put(networkId, answerFuture);
-
-        // We cant use the network ID as the connection ID as they can be out of the bounds of a long
-        newConnectionHandler.onConnect(random.nextLong(), networkId, sdpOffer);
-
-        String sdpAnswer;
-        try {
-            sdpAnswer = answerFuture.get(30, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.error("Failed waiting for SDP answer", e);
-            exchange.sendResponseHeaders(500, -1);
-            exchange.close();
-            return;
-        } finally {
-            sdpAnswers.remove(networkId);
-        }
-
-        log.trace("Received SDP answer: " + sdpAnswer);
-
-        // Sign the answer with the server identity
-        String signedAnswer;
-        try {
-            signedAnswer = serverIdentity.augmentAnswer(sdpAnswer);
-            log.trace("Signed SDP answer: " + signedAnswer);
-        } catch (Exception e) {
-            log.error("Failed to attach server identity to answer", e);
-            exchange.sendResponseHeaders(500, -1);
-            exchange.close();
-            return;
-        }
-
-        log.debug("Sending SDP answer");
-
-        byte[] body = signedAnswer.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/sdp");
-        exchange.sendResponseHeaders(200, body.length);
-        exchange.getResponseBody().write(body);
-        exchange.close();
+    private void respondEmptyWithStatus(ChannelHandlerContext ctx, HttpResponseStatus status) {
+        FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, Unpooled.EMPTY_BUFFER);
+        response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
+        ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
     }
 
     @Override
@@ -219,9 +283,10 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     @Override
     public void sendFullSdp(String targetNetworkId, String sdp) {
         log.debug("Sending sdp to " + targetNetworkId + ": " + sdp);
-        CompletableFuture<String> answer = sdpAnswers.get(targetNetworkId);
+
+        Promise<String> answer = pendingAnswers.get(targetNetworkId);
         if (answer != null) {
-            answer.complete(sdp);
+            answer.trySuccess(sdp);
         } else {
             log.debug("No pending join waiting for " + targetNetworkId);
         }
@@ -244,6 +309,6 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
 
     @Override
     public void close() {
-        server.stop(0);
+        if (serverChannel != null) serverChannel.close();
     }
 }
