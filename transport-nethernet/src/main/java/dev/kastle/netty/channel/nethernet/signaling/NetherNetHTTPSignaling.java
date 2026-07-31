@@ -21,9 +21,11 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * This class implements a signaling server using HTTP(S) for the NetherNet protocol.
@@ -39,7 +41,7 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     private ServerIdentity serverIdentity;
 
     private NetherNetServerSignaling.NewConnectionHandler newConnectionHandler;
-    private Map<String, String> sdpAnswers = new HashMap<>();
+    private Map<String, CompletableFuture<String>> sdpAnswers = new ConcurrentHashMap<>();
 
     private Random random;
 
@@ -52,7 +54,7 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     }
 
     /**
-     * Creates an HTTPS signalling server, backed by one keystore for the TLS
+     * Creates an HTTP(S) signalling server, backed by one keystore for the TLS
      * listener and another for the server identity used to sign SDP answers.
      * <p>
      * Both must be PKCS12 files. The identity key must be EC P-384, and its certificate
@@ -66,7 +68,7 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
      *
      * @param identityKeystore PKCS12 keystore holding the EC P-384 identity key
      * @param identityPassword Password for {@code identityKeystore}, or "" if unprotected
-     * @param httpsKeystore PKCS12 keystore holding the TLS certificate and key
+     * @param httpsKeystore PKCS12 keystore holding the TLS certificate and key, or null for plaintext
      * @param httpsPassword Password for {@code httpsKeystore}, or "" if unprotected
      */
     public NetherNetHTTPSignaling(File identityKeystore, String identityPassword, File httpsKeystore, String httpsPassword) {
@@ -122,9 +124,9 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     private void handleJoin(HttpExchange exchange) throws IOException {
         if (exchange.getRequestURI().getPath().equals("/v1/join")) {
             if (exchange.getRequestMethod().equals("GET")) {
-                exchange.sendResponseHeaders(200, 0);
+                exchange.sendResponseHeaders(200, -1);
             } else {
-                exchange.sendResponseHeaders(405, 0);
+                exchange.sendResponseHeaders(405, -1);
             }
 
             exchange.close();
@@ -132,7 +134,7 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
         }
 
         if (!exchange.getRequestMethod().equals("POST")) {
-            exchange.sendResponseHeaders(405, 0);
+            exchange.sendResponseHeaders(405, -1);
             exchange.close();
             return;
         }
@@ -162,24 +164,25 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
             return;
         }
 
+        // Register the pending answer before firing the callback so a fast answer isn't missed.
+        CompletableFuture<String> answerFuture = new CompletableFuture<>();
+        sdpAnswers.put(networkId, answerFuture);
+
         // We cant use the network ID as the connection ID as they can be out of the bounds of a long
         newConnectionHandler.onConnect(random.nextLong(), networkId, sdpOffer);
 
-        // Wait for sdpAnswers to contain the answer for this networkId
-        // TODO Timeout
-        while (!sdpAnswers.containsKey(networkId)) {
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.error("Thread interrupted while waiting for SDP answer", e);
-                exchange.sendResponseHeaders(500, 0);
-                exchange.close();
-                return;
-            }
+        String sdpAnswer;
+        try {
+            sdpAnswer = answerFuture.get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.error("Failed waiting for SDP answer", e);
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+            return;
+        } finally {
+            sdpAnswers.remove(networkId);
         }
 
-        String sdpAnswer = sdpAnswers.get(networkId);
         log.trace("Received SDP answer: " + sdpAnswer);
 
         // Sign the answer with the server identity
@@ -216,7 +219,12 @@ public class NetherNetHTTPSignaling implements NetherNetServerSignaling {
     @Override
     public void sendFullSdp(String targetNetworkId, String sdp) {
         log.debug("Sending sdp to " + targetNetworkId + ": " + sdp);
-        sdpAnswers.put(targetNetworkId, sdp);
+        CompletableFuture<String> answer = sdpAnswers.get(targetNetworkId);
+        if (answer != null) {
+            answer.complete(sdp);
+        } else {
+            log.debug("No pending join waiting for " + targetNetworkId);
+        }
     }
 
     @Override
