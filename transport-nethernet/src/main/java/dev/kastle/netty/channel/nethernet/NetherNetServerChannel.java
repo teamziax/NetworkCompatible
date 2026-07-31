@@ -18,6 +18,8 @@ import dev.kastle.webrtc.RTCPeerConnection;
 import dev.kastle.webrtc.RTCPeerConnectionState;
 import dev.kastle.webrtc.RTCSdpType;
 import dev.kastle.webrtc.RTCSessionDescription;
+import dev.kastle.webrtc.RTCStats;
+import dev.kastle.webrtc.RTCStatsType;
 import dev.kastle.webrtc.SetSessionDescriptionObserver;
 import io.netty.channel.AbstractServerChannel;
 import io.netty.channel.ChannelConfig;
@@ -27,9 +29,11 @@ import io.netty.util.concurrent.ScheduledFuture;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class NetherNetServerChannel extends AbstractServerChannel {
@@ -226,6 +230,9 @@ public class NetherNetServerChannel extends AbstractServerChannel {
         @Override
         public void onConnectionChange(RTCPeerConnectionState state) {
             log.debug("Connection {} state changed: {}", Long.toUnsignedString(this.connectionId), state);
+            if (state == RTCPeerConnectionState.CONNECTED) {
+                updateRemoteAddress();
+            }
             if (state == RTCPeerConnectionState.FAILED || state == RTCPeerConnectionState.CLOSED) {
                 if (child != null && child.isOpen()) {
                     log.debug("Closing connection {} due to state change: {}", Long.toUnsignedString(this.connectionId), state);
@@ -235,6 +242,58 @@ public class NetherNetServerChannel extends AbstractServerChannel {
                     handshakeTimeout.cancel(false);
                 }
             }
+        }
+
+        /**
+         * Resolve the real client address from the selected ICE candidate pair and store it on the child channel.
+         * This replaces the placeholder used at construction.
+         */
+        private void updateRemoteAddress() {
+            this.peerConnection.getStats(report -> {
+                Map<String, RTCStats> stats = report.getStats();
+
+                // Find the nominated/succeeded candidate pair, then look up its remote candidate.
+                String remoteCandidateId = null;
+                for (RTCStats stat : stats.values()) {
+                    if (stat.getType() != RTCStatsType.CANDIDATE_PAIR) {
+                        continue;
+                    }
+
+                    Map<String, Object> attributes = stat.getAttributes();
+                    if (attributes.get("state").equals("succeeded") && attributes.get("nominated").equals(true)) {
+                        remoteCandidateId = String.valueOf(attributes.get("remoteCandidateId"));
+                        break;
+                    }
+                }
+
+                // Get the stats for the candidate
+                RTCStats remoteCandidate = stats.get(remoteCandidateId);
+                if (remoteCandidateId == null || remoteCandidate == null) {
+                    return;
+                }
+
+                Map<String, Object> attributes = remoteCandidate.getAttributes();
+                String ip = (String) attributes.get("address");
+                Integer port = (Integer) attributes.get("port");
+                if (ip == null || port == null) {
+                    return;
+                }
+
+                try {
+                    InetAddress address = InetAddress.getByName(ip);
+                    this.child.setRemoteAddress(new InetSocketAddress(address, port));
+                    log.debug("Resolved remote address for {}: {}:{}", Long.toUnsignedString(connectionId), ip, port);
+                } catch (Exception e) {
+                    log.debug("Failed to resolve remote address for {}: {}", Long.toUnsignedString(connectionId), e.toString());
+                }
+            });
+        }
+
+        private boolean asBoolean(Object value) {
+            if (value instanceof Boolean bool) {
+                return bool;
+            }
+            return Boolean.parseBoolean(String.valueOf(value));
         }
 
         @Override
