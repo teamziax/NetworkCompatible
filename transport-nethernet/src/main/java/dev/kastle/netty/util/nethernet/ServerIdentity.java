@@ -1,9 +1,12 @@
 package dev.kastle.netty.util.nethernet;
 
+import org.jose4j.jwk.EcJwkGenerator;
+import org.jose4j.jwk.EllipticCurveJsonWebKey;
 import org.jose4j.jws.AlgorithmIdentifiers;
 import org.jose4j.jws.JsonWebSignature;
 import org.jose4j.jwt.JwtClaims;
 import org.jose4j.jwt.NumericDate;
+import org.jose4j.keys.EllipticCurves;
 import org.jose4j.lang.JoseException;
 
 import java.io.File;
@@ -112,6 +115,18 @@ public class ServerIdentity {
             }
         } catch (InvalidNameException ignored) { }
         return "";
+    }
+
+    /**
+     * Generate a brand-new server identity that is not stored
+     *
+     * @param domain The domain name for the server identity
+     * @return A new ServerIdentity instance
+     * @throws JoseException If there is an error creating the JWT
+     */
+    public static ServerIdentity generate(String domain) throws JoseException {
+        EllipticCurveJsonWebKey jwk = EcJwkGenerator.generateJwk(EllipticCurves.P384);
+        return new ServerIdentity(jwk.getPrivateKey(), jwk.getPublicKey(), null, domain);
     }
 
     /**
