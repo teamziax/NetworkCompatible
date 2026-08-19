@@ -1,6 +1,7 @@
 package dev.kastle.netty.channel.nethernet.signaling;
 
 import com.google.gson.JsonObject;
+import dev.kastle.netty.util.nethernet.ServerIdentity;
 import io.netty.channel.EventLoop;
 
 import java.net.ConnectException;
@@ -52,6 +53,36 @@ public interface NetherNetServerSignaling extends NetherNetSignaling {
      */
     default List<IceServerInfo> getIceServers() {
         return java.util.Collections.emptyList();
+    }
+
+    /**
+     * Returns the identity used to sign SDP answers, or null to have the channel generate an ephemeral one.
+     *
+     * @return The server identity, or null if this signaling has none
+     */
+    default ServerIdentity serverIdentity() {
+        return null;
+    }
+
+    /**
+     * Whether ICE may bind to the address the channel was bound to, instead of an ephemeral port.
+     *
+     * @return true if ICE should be pinned to the bound address
+     */
+    default boolean allowsIceOnLocalPort() {
+        return true;
+    }
+
+    /**
+     * Whether this signaling can deliver ICE candidates incrementally after the answer has been sent.
+     * <p>
+     * Request/response transports such as HTTP have nowhere to push candidates to, so they answer once
+     * with a fully gathered description via {@link #sendFullSdp(String, String)} instead.
+     *
+     * @return true if candidates are trickled as they are gathered
+     */
+    default boolean usesTrickleIce() {
+        return true;
     }
 
     /**
