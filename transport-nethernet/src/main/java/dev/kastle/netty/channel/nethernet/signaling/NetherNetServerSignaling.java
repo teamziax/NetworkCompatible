@@ -75,9 +75,6 @@ public interface NetherNetServerSignaling extends NetherNetSignaling {
 
     /**
      * Whether this signaling can deliver ICE candidates incrementally after the answer has been sent.
-     * <p>
-     * Request/response transports such as HTTP have nowhere to push candidates to, so they answer once
-     * with a fully gathered description via {@link #sendFullSdp(String, String)} instead.
      *
      * @return true if candidates are trickled as they are gathered
      */

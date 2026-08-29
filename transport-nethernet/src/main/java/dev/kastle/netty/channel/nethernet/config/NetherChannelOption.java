@@ -7,14 +7,6 @@ public class NetherChannelOption<T> extends ChannelOption<T> {
 
     /**
      * The {@link PeerConnectionConfiguration} used for the underlying peer connections.
-     * <p>
-     * ICE servers supplied by the signaling implementation are merged into this at connect time, and
-     * auto-negotiation is always forced off because the channels drive the offer/answer exchange
-     * themselves - so setting either of those here has no effect.
-     * <p>
-     * Note that {@code withPortRangeBegin}/{@code withPortRangeEnd} take a signed {@code short}, so
-     * ports above 32767 need an explicit narrowing cast, e.g. {@code (short) 60000}. The value is
-     * reinterpreted as an unsigned 16-bit port natively, so this works as intended.
      */
     public static final ChannelOption<PeerConnectionConfiguration> NETHER_PEER_CONNECTION_CONFIG =
             valueOf(NetherChannelOption.class, "NETHER_PEER_CONNECTION_CONFIG");
