@@ -1,0 +1,27 @@
+name: Registration provider
+on:
+  push:
+    branches: [codex/registration-provider]
+  pull_request:
+    paths: ['warden-signalling/**', 'settings.gradle.kts', '.github/workflows/registration-provider.yml']
+permissions:
+  contents: read
+jobs:
+  provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
+      - uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@d156388eb19639ec20ade50009f3d199ce1e2808
+      - run: ./gradlew :warden-signalling:test :warden-signalling:jar -PwardenVersion=0.1.0-registration-${{ github.sha }} --console=plain
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+        with:
+          name: warden-signalling-${{ github.sha }}
+          path: |
+            warden-signalling/build/libs/*.jar
+            warden-signalling/build/test-results/test/*.xml
+          if-no-files-found: error
