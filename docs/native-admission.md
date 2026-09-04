@@ -86,3 +86,20 @@ the accepted child. DTLS must verify the corresponding token-bound fingerprint.
 This does not itself prove an authenticated Minecraft game join. Events are
 bounded to 256 entries with an explicit dropped-event counter. No token, ICE
 password, SDP, private key or player credentials are logged.
+
+## Demonstrated native cleanup constraint and remedy
+
+[Initial CI run](https://github.com/teamziax/NetworkCompatible/actions/runs/33828480051)
+failed the immediate zero-agent assertion on endpoint reuse. The old native delete
+API schedules transport teardown and can return while its ICE agent still exists.
+The pinned dependency now includes `test/admission/teardown.cpp`, which stalls the
+teardown worker to reproduce that behavior deterministically. The new bounded
+per-peer completion API reports timeout while the agent remains, then succeeds
+only after the queued transport teardown releases it. The original zero-agent
+assertion remains unchanged.
+
+Native children use `closeAndAwait` from their Netty owner thread before completing
+close/freeing native capacity. Callback-thread calls are rejected. A five-second
+teardown timeout is a terminal endpoint failure, never permission to admit more
+peers while teardown is unresolved. Endpoint termination propagates close errors.
+The old asynchronous close API remains available for existing direct consumers.

@@ -133,7 +133,12 @@ public final class AdmittedNetherNetChildChannel extends NetherNetChildChannel {
         }
         if (tick != null) { tick.cancel(false); tick = null; }
         // Native close waits for callbacks. Never hold the monitor used by acceptDataChannel here.
-        try { if (peer != null) peer.close(); }
+        try {
+            if (peer != null && !peer.closeAndAwait(java.time.Duration.ofSeconds(5))) {
+                peer.close();
+                throw new IllegalStateException("Native transport teardown did not complete within its deadline");
+            }
+        }
         finally { incoming.clear(); decoder.clear(); }
     }
     void closeUnregistered() { doClose(); }
