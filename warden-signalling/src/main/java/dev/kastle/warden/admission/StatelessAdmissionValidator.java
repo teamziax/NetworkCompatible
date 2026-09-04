@@ -45,6 +45,14 @@ public final class StatelessAdmissionValidator implements AdmissionValidator {
         previous.values().forEach(Material::erase);
     }
 
+    public synchronized void retireKeys(long nowMillis) {
+        Map<String, Material> retained = new HashMap<>();
+        for (var entry : keys.entrySet()) {
+            if (entry.getValue().retireAfter() <= nowMillis) entry.getValue().erase();
+            else retained.put(entry.getKey(), entry.getValue());
+        }
+        keys = Map.copyOf(retained);
+    }
     public boolean ready() { return !keys.isEmpty(); }
     public Set<String> keyIds() { return keys.keySet(); }
     public synchronized void clear() { keys.values().forEach(Material::erase); keys = Map.of(); }

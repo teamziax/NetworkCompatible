@@ -11,8 +11,9 @@ required by the demonstrated native path.
 
 The conventional NetherNet server and RakNet implementation are unchanged. This
 branch adds `NativeAdmissionServerChannel` and a bounded child transport. The
-provider SPI is the shared WS2 boundary; the actual registration adapter and
-Worker profile/answer route are still separate integration work. This is **not**
+provider SPI is the shared WS2 boundary. `NativeProviderTransport` implements
+background key installation, profile publication, drain/close and bounded events.
+It rejects per-join control commands; registration is supplied by WS2. This is **not**
 stock-client admission or gameplay evidence.
 
 ## Reproduce
@@ -64,7 +65,9 @@ eviction to admit new traffic: capacity exhaustion refuses admission. Creation
 failure is terminal until token expiry. A periodic sweep retires closed claims.
 Same-tuple consent and retransmissions keep working after token expiry; another
 tuple never acquires a used token. A fresh profile incarnation on restart is a
-required provider contract, not currently supplied by this bare endpoint API.
+required provider contract implemented by `NativeProviderTransport`. Its published
+candidate uses the explicit bound interface, fixed port and pre-provisioned PEM
+identity. Wildcard binds are refused until an advertised-address contract exists.
 
 Java receive queue: 128 frames of at most 10,000 bytes. Reliable assembly: at most
 262,144 bytes. Java outbound hard bound: 1 MiB including pending write overhead;
@@ -103,3 +106,8 @@ close/freeing native capacity. Callback-thread calls are rejected. A five-second
 teardown timeout is a terminal endpoint failure, never permission to admit more
 peers while teardown is unresolved. Endpoint termination propagates close errors.
 The old asynchronous close API remains available for existing direct consumers.
+
+The cleanup remedy passes [CI run 33829800445](https://github.com/teamziax/NetworkCompatible/actions/runs/33829800445).
+The provider boundary test also verifies zero peer creation from background
+profile/key setup, key rotation, rejection of join-admission control, and a fresh
+incarnation when the same UDP endpoint restarts.

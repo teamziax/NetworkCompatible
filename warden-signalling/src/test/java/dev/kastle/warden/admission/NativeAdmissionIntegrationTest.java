@@ -138,4 +138,35 @@ class NativeAdmissionIntegrationTest {
             System.out.println("native-adapter PASS fixedUdp=49190 hostCreations=1 channels=3 replayRejected=true perJoinControl=0 cleanup=true raknetPong=49191");
         } finally { endpoint.close().awaitUninterruptibly();rak.close().awaitUninterruptibly();group.shutdownGracefully(0,2,TimeUnit.SECONDS).sync();rakGroup.shutdownGracefully(0,2,TimeUnit.SECONDS).sync(); }
     }
+    @Test @Timeout(30) void providerBoundaryPublishesFreshBootIdentityWithoutClientState() throws Exception {
+        var id = identity(); var group = new DefaultEventLoopGroup(1);
+        ServerBootstrap bootstrap = new ServerBootstrap().group(group).childHandler(new ChannelInboundHandlerAdapter());
+        NativeProviderTransport transport = null;
+        try {
+            long creations = PeerConnection.nativeCreationAttempts();
+            transport = NativeProviderTransport.open(bootstrap, new InetSocketAddress("127.0.0.1",49196), id.certificate(), id.privateKey(), AdmissionGate.Limits.defaults()).toCompletableFuture().get(5,TimeUnit.SECONDS);
+            assertTrue(transport.hostProfile().toCompletableFuture().isCompletedExceptionally());
+            transport.installTicketKeys(List.of(new org.cloudburstmc.netty.warden.ProviderTransport.TicketKey("K001",FakeWarden.SECRET))).toCompletableFuture().get();
+            var first = transport.hostProfile().toCompletableFuture().get();
+            assertEquals(id.fingerprint(),first.get("dtlsFingerprint").getAsString());
+            assertEquals(49196,first.getAsJsonArray("candidates").get(0).getAsJsonObject().get("port").getAsInt());
+            String incarnation = first.getAsJsonObject("statelessAdmission").get("incarnation").getAsString();
+            assertTrue(incarnation.matches("[0-9a-f]{32}"));
+            var command = new com.google.gson.JsonObject();command.addProperty("kind","join-admission");
+            assertEquals(org.cloudburstmc.netty.warden.ProviderTransport.ApplyResult.REJECTED,transport.applyControl(command).toCompletableFuture().get());
+            assertEquals(0,transport.channel().admissionStats().claims());assertEquals(0,transport.channel().nativeStats()[2]);
+            assertEquals(creations,PeerConnection.nativeCreationAttempts());
+            transport.installTicketKeys(List.of(new org.cloudburstmc.netty.warden.ProviderTransport.TicketKey("K001",FakeWarden.SECRET,0,System.currentTimeMillis()+60_000),
+                new org.cloudburstmc.netty.warden.ProviderTransport.TicketKey("K002","next-background-key-of-at-least-32-bytes"))).toCompletableFuture().get();
+            assertEquals("K002",transport.hostProfile().toCompletableFuture().get().get("credentialKeyId").getAsString());
+            transport.drain().toCompletableFuture().get();assertTrue(transport.hostProfile().toCompletableFuture().isCompletedExceptionally());
+            transport.close().toCompletableFuture().get(5,TimeUnit.SECONDS);
+            transport = NativeProviderTransport.open(bootstrap, new InetSocketAddress("127.0.0.1",49196), id.certificate(), id.privateKey(), AdmissionGate.Limits.defaults()).toCompletableFuture().get(5,TimeUnit.SECONDS);
+            transport.installTicketKeys(List.of(new org.cloudburstmc.netty.warden.ProviderTransport.TicketKey("K001",FakeWarden.SECRET))).toCompletableFuture().get();
+            String restarted = transport.hostProfile().toCompletableFuture().get().getAsJsonObject("statelessAdmission").get("incarnation").getAsString();
+            assertNotEquals(incarnation,restarted);assertNotEquals(NativeProviderTransport.audience(incarnation),NativeProviderTransport.audience(restarted));
+            assertEquals(creations,PeerConnection.nativeCreationAttempts());
+        } finally { if (transport != null) transport.close().toCompletableFuture().get(5,TimeUnit.SECONDS);group.shutdownGracefully(0,1,TimeUnit.SECONDS).sync(); }
+    }
+
 }
