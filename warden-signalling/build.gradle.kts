@@ -13,6 +13,10 @@ tasks.jar { manifest.attributes["Automatic-Module-Name"] = "org.cloudburstmc.net
 
 
 tasks.test { useJUnitPlatform { excludeTags("native") } }
+tasks.register("nativeBenchClasspath") {
+    dependsOn(tasks.testClasses)
+    doLast { println(sourceSets.test.get().runtimeClasspath.asPath) }
+}
 tasks.register<Test>("nativeAdmissionTest") {
     description = "Real fixed-UDP stateless host integration against the pinned JNI library"
     testClassesDirs = sourceSets.test.get().output.classesDirs
