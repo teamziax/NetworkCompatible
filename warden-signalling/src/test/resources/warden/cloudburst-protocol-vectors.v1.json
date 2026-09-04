@@ -1,0 +1,674 @@
+{
+  "admissionReplay": [
+    {
+      "cacheBefore": [],
+      "expected": {
+        "action": "accepted",
+        "cacheSize": 1,
+        "ok": true
+      },
+      "input": {
+        "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+        "expiresAt": 1780000030000,
+        "maxEntries": 4,
+        "now": 1780000001000,
+        "tuple": {
+          "address": "198.51.100.10",
+          "port": 53000
+        }
+      },
+      "name": "admission-replay-first-valid-stun-claims-tuple"
+    },
+    {
+      "cacheBefore": [
+        {
+          "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+          "expiresAt": 1780000030000,
+          "firstSeenAt": 1780000001000,
+          "lastSeenAt": 1780000001000,
+          "tuple": {
+            "address": "198.51.100.10",
+            "port": 53000
+          }
+        }
+      ],
+      "expected": {
+        "action": "retransmit",
+        "cacheSize": 1,
+        "ok": true
+      },
+      "input": {
+        "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+        "expiresAt": 1780000030000,
+        "maxEntries": 4,
+        "now": 1780000002000,
+        "tuple": {
+          "address": "198.51.100.10",
+          "port": 53000
+        }
+      },
+      "name": "admission-replay-same-tuple-retransmit"
+    },
+    {
+      "cacheBefore": [
+        {
+          "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+          "expiresAt": 1780000030000,
+          "firstSeenAt": 1780000001000,
+          "lastSeenAt": 1780000002000,
+          "tuple": {
+            "address": "198.51.100.10",
+            "port": 53000
+          }
+        }
+      ],
+      "expected": {
+        "cacheSize": 1,
+        "ok": false,
+        "reason": "tuple_conflict"
+      },
+      "input": {
+        "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+        "expiresAt": 1780000030000,
+        "maxEntries": 4,
+        "now": 1780000003000,
+        "tuple": {
+          "address": "203.0.113.44",
+          "port": 53000
+        }
+      },
+      "name": "admission-replay-different-tuple-conflict"
+    },
+    {
+      "cacheBefore": [],
+      "expected": {
+        "cacheSize": 0,
+        "ok": false,
+        "reason": "admission_expired"
+      },
+      "input": {
+        "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+        "expiresAt": 1780000030000,
+        "maxEntries": 4,
+        "now": 1780000030000,
+        "tuple": {
+          "address": "198.51.100.10",
+          "port": 53000
+        }
+      },
+      "name": "admission-replay-expired-ticket-rejected"
+    },
+    {
+      "cacheBefore": [
+        {
+          "admissionKey": "otherAdmission:clientUf",
+          "expiresAt": 1780000030000,
+          "firstSeenAt": 1780000001000,
+          "lastSeenAt": 1780000001000,
+          "tuple": {
+            "address": "198.51.100.20",
+            "port": 54000
+          }
+        }
+      ],
+      "expected": {
+        "cacheSize": 1,
+        "ok": false,
+        "reason": "capacity_exceeded"
+      },
+      "input": {
+        "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+        "expiresAt": 1780000030000,
+        "maxEntries": 1,
+        "now": 1780000002000,
+        "tuple": {
+          "address": "198.51.100.10",
+          "port": 53000
+        }
+      },
+      "name": "admission-replay-bounded-cache-capacity"
+    }
+  ],
+  "answerTicketRejections": [
+    {
+      "claims": {
+        "clientIceUfrag": "clientVectorUf",
+        "expiresAt": 1780000030000,
+        "gameServerId": "gs_vector_lon",
+        "networkId": "9876543210123456789",
+        "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+        "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+        "signalServerId": "sig_vector_prod"
+      },
+      "expected": {
+        "validates": false
+      },
+      "key": {
+        "keyId": "K001",
+        "secretUtf8": "cloudburst-vector-ticket-secret"
+      },
+      "localUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+      "name": "answer-ticket-expired",
+      "now": 1780000030000,
+      "reason": "expired"
+    },
+    {
+      "claims": {
+        "clientIceUfrag": "clientVectorUf",
+        "expiresAt": 1780000030000,
+        "gameServerId": "gs_vector_lon",
+        "networkId": "9876543210123456789",
+        "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+        "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+        "signalServerId": "sig_vector_prod"
+      },
+      "expected": {
+        "validates": false
+      },
+      "key": {
+        "keyId": "K002",
+        "secretUtf8": "cloudburst-vector-other-ticket-secret"
+      },
+      "localUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+      "name": "answer-ticket-wrong-key",
+      "now": 1780000001000,
+      "reason": "key_mismatch"
+    },
+    {
+      "claims": {
+        "clientIceUfrag": "clientVectorUf",
+        "expiresAt": 1780000030000,
+        "gameServerId": "gs_vector_lon",
+        "networkId": "9876543210123456789",
+        "offerFingerprintHash": "BC32DIFFERENTOFFER001",
+        "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+        "signalServerId": "sig_vector_prod"
+      },
+      "expected": {
+        "validates": false
+      },
+      "key": {
+        "keyId": "K001",
+        "secretUtf8": "cloudburst-vector-ticket-secret"
+      },
+      "localUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+      "name": "answer-ticket-wrong-claims",
+      "now": 1780000001000,
+      "reason": "claim_mismatch"
+    }
+  ],
+  "answerTickets": [
+    {
+      "claims": {
+        "clientIceUfrag": "clientVectorUf",
+        "expiresAt": 1780000030000,
+        "gameServerId": "gs_vector_lon",
+        "networkId": "9876543210123456789",
+        "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+        "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+        "signalServerId": "sig_vector_prod"
+      },
+      "expected": {
+        "expiredAt": 1780000030000,
+        "icePwd": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+        "localUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+        "parsed": {
+          "expiresAt": 1780000030000,
+          "keyId": "K001",
+          "nonce": "ABCDEFGHIJKLMNOP",
+          "tag": "SLCVYJOJR5VY6OUB"
+        },
+        "ticketId": "f8e63e66b8656a15f6a152e8c4c17231",
+        "validAt": 1780000001000,
+        "validatesAtExpiredTime": false,
+        "validatesAtValidTime": true
+      },
+      "key": {
+        "keyId": "K001",
+        "secretUtf8": "cloudburst-vector-ticket-secret"
+      },
+      "name": "answer-ticket-v1-fixed-nonce",
+      "nonce": "ABCDEFGHIJKLMNOP"
+    }
+  ],
+  "encoding": {
+    "bytes": "lowercase-hex",
+    "sdpLineEndings": "crlf",
+    "text": "utf-8"
+  },
+  "kind": "warden-cloudburst-protocol-vectors",
+  "nativeHandoffs": [
+    {
+      "expected": {
+        "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+        "hostState": {
+          "createNativeSessionOn": "first-valid-stun",
+          "rejectTupleConflictBeforeSessionPromotion": true
+        },
+        "lifecycle": {
+          "afterFirstAcceptedStun": [
+            "ticket.ice_seen"
+          ],
+          "afterNativeSessionConnected": [
+            "ticket.ice_connected",
+            "ticket.dtls_connected",
+            "ticket.sctp_connected",
+            "ticket.data_channels_open"
+          ]
+        },
+        "rawStunMessageIntegrityRequired": true,
+        "validationSource": "raw-stun-message-integrity"
+      },
+      "firstStun": {
+        "now": 1780000001000,
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f7255660000080014baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "transactionIdHex": "000102030405060708090a0b",
+        "tuple": {
+          "address": "198.51.100.10",
+          "port": 53000
+        },
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      },
+      "joinAdmission": {
+        "answer": {
+          "icePwd": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+          "iceUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+          "sdp": "v=0\r\no=- 123456789 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB\r\na=ice-pwd:4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ\r\na=ice-options:trickle\r\na=fingerprint:sha-256 11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00\r\na=identity:fixture.identity.assertion\r\na=setup:active\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\na=candidate:1 1 udp 2130706431 203.0.113.10 19132 typ host\r\na=end-of-candidates\r\n"
+        },
+        "answerTicket": {
+          "claims": {
+            "clientIceUfrag": "clientVectorUf",
+            "expiresAt": 1780000030000,
+            "gameServerId": "gs_vector_lon",
+            "networkId": "9876543210123456789",
+            "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+            "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+            "signalServerId": "sig_vector_prod"
+          },
+          "expiresAt": 1780000030000,
+          "key": {
+            "keyId": "K001",
+            "secretUtf8": "cloudburst-vector-ticket-secret"
+          },
+          "localUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+          "ticketId": "f8e63e66b8656a15f6a152e8c4c17231",
+          "validAt": 1780000001000
+        },
+        "clientOffer": {
+          "fingerprints": [
+            "sha-256 AA:BB:CC"
+          ],
+          "icePwd": "client-password-vector",
+          "iceUfrag": "clientVectorUf",
+          "identity": "client.identity.assertion",
+          "sctpPort": 5000,
+          "sdp": "v=0\na=fingerprint:sha-256 AA:BB:CC\na=identity:client.identity.assertion\na=ice-ufrag:clientVectorUf\na=ice-pwd:client-password-vector\na=sctp-port:5000\n",
+          "strippedIdentitySdp": "v=0\r\na=fingerprint:sha-256 AA:BB:CC\r\na=ice-ufrag:clientVectorUf\r\na=ice-pwd:client-password-vector\r\na=sctp-port:5000\r\n"
+        },
+        "commandKind": "join-admission",
+        "decisionId": "dec_native_handoff_vector",
+        "gameServerId": "gs_vector_lon",
+        "networkId": "9876543210123456789",
+        "player": {
+          "identitySource": "minecraft",
+          "playerKey": "xuid:2535413123456789",
+          "xuid": "2535413123456789"
+        },
+        "signalServerId": "sig_vector_prod"
+      },
+      "name": "native-handoff-join-admission-first-stun",
+      "replayChecks": [
+        {
+          "cacheBefore": [],
+          "expected": {
+            "action": "accepted",
+            "cacheSize": 1,
+            "ok": true
+          },
+          "input": {
+            "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+            "expiresAt": 1780000030000,
+            "maxEntries": 4,
+            "now": 1780000001000,
+            "tuple": {
+              "address": "198.51.100.10",
+              "port": 53000
+            }
+          },
+          "name": "native-handoff-first-valid-stun-claims-tuple"
+        },
+        {
+          "cacheBefore": [
+            {
+              "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+              "expiresAt": 1780000030000,
+              "firstSeenAt": 1780000001000,
+              "lastSeenAt": 1780000001000,
+              "tuple": {
+                "address": "198.51.100.10",
+                "port": 53000
+              }
+            }
+          ],
+          "expected": {
+            "action": "retransmit",
+            "cacheSize": 1,
+            "ok": true
+          },
+          "input": {
+            "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+            "expiresAt": 1780000030000,
+            "maxEntries": 4,
+            "now": 1780000002000,
+            "tuple": {
+              "address": "198.51.100.10",
+              "port": 53000
+            }
+          },
+          "name": "native-handoff-same-tuple-retransmit"
+        },
+        {
+          "cacheBefore": [
+            {
+              "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+              "expiresAt": 1780000030000,
+              "firstSeenAt": 1780000001000,
+              "lastSeenAt": 1780000002000,
+              "tuple": {
+                "address": "198.51.100.10",
+                "port": 53000
+              }
+            }
+          ],
+          "expected": {
+            "cacheSize": 1,
+            "ok": false,
+            "reason": "tuple_conflict"
+          },
+          "input": {
+            "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+            "expiresAt": 1780000030000,
+            "maxEntries": 4,
+            "now": 1780000003000,
+            "tuple": {
+              "address": "203.0.113.44",
+              "port": 53000
+            }
+          },
+          "name": "native-handoff-different-tuple-conflict"
+        }
+      ]
+    }
+  ],
+  "nethernetFrames": [
+    {
+      "decoded": {
+        "complete": true,
+        "payloadHex": "01020304",
+        "remainingFragments": 0
+      },
+      "frameHex": "0001020304",
+      "name": "complete-reliable-payload",
+      "payloadHex": "01020304",
+      "remainingFragments": 0
+    },
+    {
+      "decoded": {
+        "complete": false,
+        "payloadHex": "0a0b",
+        "remainingFragments": 2
+      },
+      "frameHex": "020a0b",
+      "name": "fragment-countdown-payload",
+      "payloadHex": "0a0b",
+      "remainingFragments": 2
+    }
+  ],
+  "sdp": [
+    {
+      "answer": {
+        "input": {
+          "candidates": [
+            {
+              "address": "203.0.113.10",
+              "component": 1,
+              "foundation": "1",
+              "port": 19132,
+              "priority": 2130706431,
+              "transport": "udp",
+              "type": "host"
+            }
+          ],
+          "fingerprint": "sha-256 11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00",
+          "icePwd": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+          "iceUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+          "identity": "fixture.identity.assertion",
+          "maxMessageSize": 262144,
+          "originSessionId": "123456789",
+          "sctpPort": 5000
+        },
+        "sdp": "v=0\r\no=- 123456789 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB\r\na=ice-pwd:4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ\r\na=ice-options:trickle\r\na=fingerprint:sha-256 11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00\r\na=identity:fixture.identity.assertion\r\na=setup:active\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\na=candidate:1 1 udp 2130706431 203.0.113.10 19132 typ host\r\na=end-of-candidates\r\n"
+      },
+      "name": "data-channel-offer-answer-normalization",
+      "offer": {
+        "parsed": {
+          "fingerprints": [
+            "sha-256 AA:BB:CC"
+          ],
+          "icePwd": "client-password-vector",
+          "iceUfrag": "clientVectorUf",
+          "identity": "client.identity.assertion",
+          "sctpPort": 5000
+        },
+        "sdp": "v=0\na=fingerprint:sha-256 AA:BB:CC\na=identity:client.identity.assertion\na=ice-ufrag:clientVectorUf\na=ice-pwd:client-password-vector\na=sctp-port:5000\n",
+        "strippedIdentitySdp": "v=0\r\na=fingerprint:sha-256 AA:BB:CC\r\na=ice-ufrag:clientVectorUf\r\na=ice-pwd:client-password-vector\r\na=sctp-port:5000\r\n"
+      }
+    }
+  ],
+  "stun": {
+    "iceBindingRequests": [
+      {
+        "expectedLocalUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+        "expectedRemoteUfrag": "clientVectorUf",
+        "messageIntegrityHex": "baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "name": "warden-answer-ticket-binding-request",
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f7255660000080014baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "passwordUtf8": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      }
+    ],
+    "iceBindingRequestRejections": [
+      {
+        "expectedLocalUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+        "expectedRemoteUfrag": "clientVectorUf",
+        "name": "warden-answer-ticket-binding-missing-integrity",
+        "packetHex": "000100442112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f72556600",
+        "passwordUtf8": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+        "reason": "message_integrity_missing",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      },
+      {
+        "expectedLocalUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+        "expectedRemoteUfrag": "clientVectorUf",
+        "messageIntegrityHex": "51d99a091c781485f4e8699331bee1f3f524011d",
+        "name": "warden-answer-ticket-binding-integrity-failed",
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f725566000008001451d99a091c781485f4e8699331bee1f3f524011d",
+        "passwordUtf8": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+        "reason": "message_integrity_failed",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      },
+      {
+        "expectedLocalUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+        "expectedRemoteUfrag": "clientVectorUf",
+        "messageIntegrityHex": "ca5f77dedcdaccbe97fe9737bb5c10dc9c69d24a",
+        "name": "warden-answer-ticket-binding-username-mismatch",
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003e57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a6f74686572436c69656e745566000000080014ca5f77dedcdaccbe97fe9737bb5c10dc9c69d24a",
+        "passwordUtf8": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+        "reason": "username_mismatch",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:otherClientUf"
+      },
+      {
+        "expectedLocalUfrag": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB",
+        "expectedRemoteUfrag": "clientVectorUf",
+        "messageIntegrityHex": "dcb4d5372647e8bb0ee12d1f019cbe727540630d",
+        "name": "warden-answer-ticket-binding-username-malformed",
+        "packetHex": "0001004c2112a442000102030405060708090a0b0006003057444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f554200080014dcb4d5372647e8bb0ee12d1f019cbe727540630d",
+        "passwordUtf8": "4HU323WHG3EB467OBC3LXR5FLXO25W4BCUPYWNQ",
+        "reason": "username_malformed",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB"
+      }
+    ],
+    "rfc5769": {
+      "messageIntegrityHex": "9aeaa70cbfd8cb56781ef2b5b2d3f249c1b571a2",
+      "name": "rfc5769-sample-request",
+      "packetHex": "000100582112a442b7e7a701bc34d686fa87dfae802200105354554e207465737420636c69656e74002400046e0001ff80290008932ff9b151263b36000600096576746a3a68367659202020000800149aeaa70cbfd8cb56781ef2b5b2d3f249c1b571a280280004e57a3bcf",
+      "passwordUtf8": "VOkJxbRl1RmTxUk/WvJxBt",
+      "transactionIdHex": "b7e7a701bc34d686fa87dfae",
+      "username": "evtj:h6vY"
+    },
+    "wardenAdmissionChecks": [
+      {
+        "claims": {
+          "clientIceUfrag": "clientVectorUf",
+          "expiresAt": 1780000030000,
+          "gameServerId": "gs_vector_lon",
+          "networkId": "9876543210123456789",
+          "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+          "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+          "signalServerId": "sig_vector_prod"
+        },
+        "expected": {
+          "admissionKey": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf",
+          "ok": true
+        },
+        "expectedRemoteUfrag": "clientVectorUf",
+        "key": {
+          "keyId": "K001",
+          "secretUtf8": "cloudburst-vector-ticket-secret"
+        },
+        "name": "warden-answer-ticket-admission-valid",
+        "now": 1780000001000,
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f7255660000080014baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      },
+      {
+        "claims": {
+          "clientIceUfrag": "clientVectorUf",
+          "expiresAt": 1780000030000,
+          "gameServerId": "gs_vector_lon",
+          "networkId": "9876543210123456789",
+          "offerFingerprintHash": "BC32DIFFERENTOFFER001",
+          "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+          "signalServerId": "sig_vector_prod"
+        },
+        "expected": {
+          "ok": false,
+          "reason": "answer_ticket_invalid"
+        },
+        "expectedRemoteUfrag": "clientVectorUf",
+        "key": {
+          "keyId": "K001",
+          "secretUtf8": "cloudburst-vector-ticket-secret"
+        },
+        "name": "warden-answer-ticket-admission-wrong-claims",
+        "now": 1780000001000,
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f7255660000080014baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      },
+      {
+        "claims": {
+          "clientIceUfrag": "clientVectorUf",
+          "expiresAt": 1780000030000,
+          "gameServerId": "gs_vector_lon",
+          "networkId": "9876543210123456789",
+          "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+          "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+          "signalServerId": "sig_vector_prod"
+        },
+        "expected": {
+          "ok": false,
+          "reason": "answer_ticket_expired"
+        },
+        "expectedRemoteUfrag": "clientVectorUf",
+        "key": {
+          "keyId": "K001",
+          "secretUtf8": "cloudburst-vector-ticket-secret"
+        },
+        "name": "warden-answer-ticket-admission-expired",
+        "now": 1780000030000,
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f7255660000080014baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      },
+      {
+        "claims": {
+          "clientIceUfrag": "clientVectorUf",
+          "expiresAt": 1780000030000,
+          "gameServerId": "gs_vector_lon",
+          "networkId": "9876543210123456789",
+          "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+          "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+          "signalServerId": "sig_vector_prod"
+        },
+        "expected": {
+          "ok": false,
+          "reason": "answer_ticket_invalid"
+        },
+        "expectedRemoteUfrag": "clientVectorUf",
+        "key": {
+          "keyId": "K002",
+          "secretUtf8": "cloudburst-vector-other-ticket-secret"
+        },
+        "name": "warden-answer-ticket-admission-wrong-key",
+        "now": 1780000001000,
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f7255660000080014baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      },
+      {
+        "claims": {
+          "clientIceUfrag": "clientVectorUf",
+          "expiresAt": 1780000030000,
+          "gameServerId": "gs_vector_lon",
+          "networkId": "9876543210123456789",
+          "offerFingerprintHash": "BC32OFFERHASHVECTOR001",
+          "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+          "signalServerId": "sig_vector_prod"
+        },
+        "expected": {
+          "ok": false,
+          "reason": "username_mismatch"
+        },
+        "expectedRemoteUfrag": "otherClientUf",
+        "key": {
+          "keyId": "K001",
+          "secretUtf8": "cloudburst-vector-ticket-secret"
+        },
+        "name": "warden-answer-ticket-admission-client-ufrag-mismatch",
+        "now": 1780000001000,
+        "packetHex": "0001005c2112a442000102030405060708090a0b0006003f57444e314b30303130305446524b54414142434445464748494a4b4c4d4e4f50534c4356594a4f4a52355659364f55423a636c69656e74566563746f7255660000080014baef44d14285cac6167606c6bfbae00d49f6f66c",
+        "transactionIdHex": "000102030405060708090a0b",
+        "username": "WDN1K00100TFRKTAABCDEFGHIJKLMNOPSLCVYJOJR5VY6OUB:clientVectorUf"
+      }
+    ]
+  },
+  "suites": [
+    "answer-ticket",
+    "answer-ticket-rejections",
+    "stun-message-integrity",
+    "stun-admission-rejections",
+    "admission-replay",
+    "native-handoff",
+    "sdp-normalization",
+    "nethernet-frame"
+  ],
+  "warning": "Fixture-only protocol vectors. Secrets and credentials in this file are public test material and must never be reused for production Warden resources.",
+  "version": 1
+}

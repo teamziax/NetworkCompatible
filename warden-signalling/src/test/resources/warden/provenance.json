@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/teamziax/warden-signalling",
+  "revision": "d5a5645bea9db232659f27e363b20bc8a39b79a0",
+  "files": {
+    "cloudburst-protocol-vectors.v1.json": "19aa5072e93a255b5be339de54c16ef7b35b703d3248feed64b5b21777bfd5c2",
+    "stateless-admission-v2.fixtures.json": "39006ac30cb8e4c547c74d9641d1c1fb7e845017854300576e21ade4e63736dd"
+  }
+}
