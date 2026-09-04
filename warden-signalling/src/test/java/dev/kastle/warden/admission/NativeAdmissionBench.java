@@ -64,7 +64,9 @@ public final class NativeAdmissionBench {
                 if (failure.get() != null) throw new IllegalStateException("Host pipeline failure", failure.get());
                 var endpoint = host.channel();
                 emit("stats", Map.of("admission", endpoint.admissionStats(), "native", endpoint.nativeStats(), "nativeCreationAttempts", PeerConnection.nativeCreationAttempts(), "hostCreations", endpoint.creationAttempts(), "deliveredChannels", delivered.get()));
-                for (var event : endpoint.pollEvents()) emit("stage", Map.of("stage", event.stage(), "validationToCreationNanos", event.validationToCreationNanos()));
+                for (var event : endpoint.pollEvents()) emit("stage", Map.of("stage", event.stage(), "ticketId", event.ticketId(),
+                    "occurredAt", java.time.Instant.ofEpochMilli(event.occurredAt()).toString(), "reason", event.reason(),
+                    "validationToCreationNanos", event.validationToCreationNanos()));
                 Thread.sleep(50);
             }
             host.close().toCompletableFuture().get(6, TimeUnit.SECONDS);
