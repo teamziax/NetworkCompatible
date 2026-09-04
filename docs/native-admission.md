@@ -117,3 +117,8 @@ a second cleanup pitfall: Netty's `closeFuture` succeeds even when `doClose`
 throws. Capacity now follows a separate native termination result. Failed teardown
 retains the native capacity count, drains admission and fails the endpoint; it
 cannot turn into apparent successful cleanup through Netty's close notification.
+
+Worker CI run 33830909678 additionally retained an ICE agent through a transport
+reference outside the teardown task. The native pinned regression now holds that
+reference explicitly. Completion follows actual destruction of all transports,
+not just release of the teardown task references, with zero-agent reuse retained.
