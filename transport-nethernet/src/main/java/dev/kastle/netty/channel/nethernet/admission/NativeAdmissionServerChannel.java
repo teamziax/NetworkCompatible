@@ -4,6 +4,8 @@ import dev.kastle.netty.channel.nethernet.config.DefaultNetherServerChannelConfi
 import io.netty.channel.*;
 import io.netty.util.NetUtil;
 import io.netty.util.concurrent.ScheduledFuture;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 import tel.schich.libdatachannel.*;
 import java.net.*;
 import java.util.*;
@@ -14,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Fixed-UDP native host. The only source of client context is authenticated raw STUN. */
 public final class NativeAdmissionServerChannel extends AbstractServerChannel {
+    private static final InternalLogger log = InternalLoggerFactory.getInstance(NativeAdmissionServerChannel.class);
     public record Event(String ticketId, String stage, String reason, long occurredAt, long validationToCreationNanos) {}
     private static final class Session {
         final AdmissionGate.Reservation reservation;
@@ -63,6 +66,9 @@ public final class NativeAdmissionServerChannel extends AbstractServerChannel {
         if (!isOpen()) return;
         try {
             if (mux.failure() != null || nativeCloseFailure.get() != null) { close(); return; }
+            var warning = gate.pollPendingLimitWarning(System.nanoTime());
+            if (warning != null) log.warn("Warden pending admission limit reached: pending={}, limit={}, rejectedSinceLastWarning={}",
+                warning.pending(), warning.limit(), warning.rejected());
             for (AdmissionGate.Reservation r : gate.sweep(System.currentTimeMillis(), System.nanoTime())) finish(r, "timeout");
             // Limit creation work per tick, independent of packet rate and native callback rate.
             for (int i = 0; i < 4 && nativeCloseFailure.get() == null && liveNativePeers.get() < maxNativePeers; i++) { var r = pending.poll(); if (r == null) break; create(r); }
@@ -111,7 +117,9 @@ public final class NativeAdmissionServerChannel extends AbstractServerChannel {
                 throw new IllegalStateException("Native identity does not match published profile");
             sessions.put(reservation, session);
             pipeline().fireChannelRead(child); pipeline().fireChannelReadComplete();
-            if (!gate.ready(reservation)) { finish(reservation, "cancelled"); return; }
+            byte[] initialPacket = gate.ready(reservation);
+            if (initialPacket == null) { finish(reservation, "cancelled"); return; }
+            mux.replay(initialPacket, reservation.tuple().getAddress(), reservation.tuple().getPort());
             emit(reservation, "ticket.ice_seen", "token_and_stun_validated", session.creationNanos);
         } catch (Exception failure) {
             gate.finish(reservation); sessions.remove(reservation);
