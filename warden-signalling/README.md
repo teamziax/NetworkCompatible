@@ -70,7 +70,7 @@ Control commands are validated before native handoff. `PENDING` holds the page;
 volatile queued admission. Only redacted ticket/decision markers persist for
 pending admissions. A replacement process records `ticket.failed` and discards
 those old admissions before acknowledging. SDP/passwords never enter that journal.
-Unknown/invalid commands stop ordered consumption and hold the cursor. Ticket
+Unknown/invalid commands hold the cursor; later valid lifecycle commands still run in page order. Ticket
 lifecycle events and separate `game_joined` events use existing wire formats.
 
 This slice supplies a fake transport. WS3 supplies `dev.kastle.warden.admission`

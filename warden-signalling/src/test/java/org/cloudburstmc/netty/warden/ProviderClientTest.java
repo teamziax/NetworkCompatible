@@ -13,11 +13,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProviderClientTest {
     static final class FakeTransport implements ProviderTransport {
         final CompletableFuture<Void> closed = new CompletableFuture<>();
-        volatile int installed, applied;
+        volatile int installed, applied, admissions, drains;
         volatile ApplyResult result = ApplyResult.APPLIED;
         public CompletionStage<JsonObject> hostProfile() { JsonObject p = new JsonObject(); p.addProperty("credentialKeyId", "T001"); p.addProperty("dtlsFingerprint", "fixture-native-profile"); return CompletableFuture.completedFuture(p); }
         public CompletionStage<Void> installTicketKeys(List<TicketKey> keys) { installed = keys.size(); return CompletableFuture.completedFuture(null); }
-        public CompletionStage<ApplyResult> applyControl(JsonObject c) { applied++; return CompletableFuture.completedFuture(result); }
+        public CompletionStage<ApplyResult> applyControl(JsonObject c) {
+            applied++; String kind = c.get("kind").getAsString();
+            if (kind.equals("join-admission")) admissions++;
+            if (kind.equals("drain")) drains++;
+            return CompletableFuture.completedFuture(kind.equals("join-admission") ? result : ApplyResult.APPLIED);
+        }
         public List<JsonObject> pollEvents() { return List.of(); }
         public CompletionStage<Void> drain() { return CompletableFuture.completedFuture(null); }
         public CompletionStage<Void> close() { closed.complete(null); return closed; }
@@ -65,14 +70,18 @@ class ProviderClientTest {
             }
             fixture.addProperty("gameServerId", "example-machine-1"); fixture.addProperty("signalServerId", "example-service-1");
             fixture.getAsJsonObject("ticketClaims").addProperty("gameServerId", "example-machine-1"); fixture.getAsJsonObject("ticketClaims").addProperty("signalServerId", "example-service-1"); fixture.getAsJsonObject("ticketClaims").addProperty("expiresAt", System.currentTimeMillis() + 30000);
-            host.result = ProviderTransport.ApplyResult.PENDING; JsonArray commands = new JsonArray(); commands.add(fixture); stub.commands = commands;
-            eventually(() -> host.applied > 0); assertEquals(0, stub.acknowledgements);
+            host.result = ProviderTransport.ApplyResult.PENDING; JsonArray commands = new JsonArray(); commands.add(fixture);
+            JsonObject unknown = new JsonObject(); unknown.addProperty("kind", "future-command"); commands.add(unknown);
+            JsonObject drain = new JsonObject(); drain.addProperty("kind", "drain"); commands.add(drain); stub.commands = commands;
+            eventually(() -> host.admissions > 0 && host.drains > 0); assertEquals(0, stub.acknowledgements);
+            // The provider operator removes the unknown command; pending admission still holds ack.
+            JsonArray known = new JsonArray(); known.add(fixture); known.add(drain); stub.commands = known;
             client.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
             FakeTransport replacement = new FakeTransport(); ProviderClient resumed = new ProviderClient(config, new ProviderStateStore(path), replacement, () -> null, health, message -> {});
             try {
                 resumed.start().get(20, TimeUnit.SECONDS);
                 eventually(() -> stub.acknowledgements == 1 && !stub.events.isEmpty());
-                assertEquals(0, replacement.applied, "Volatile admission from the prior incarnation must fail, not resurrect");
+                assertEquals(0, replacement.admissions, "Volatile admission from the prior incarnation must fail, not resurrect");
                 assertEquals("ticket.failed", stub.events.getFirst().get("stage").getAsString());
                 assertFalse(java.nio.file.Files.readString(path.resolve("provider-state.json")).contains("client-password-valid"));
             } finally { resumed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }

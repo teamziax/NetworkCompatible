@@ -191,7 +191,7 @@ public final class ProviderClient implements AutoCloseable {
         boolean terminal = true;
         for (JsonElement item : commands) {
             JsonObject command = item.getAsJsonObject(); String kind = command.has("kind") ? command.get("kind").getAsString() : "";
-            if (!Set.of("noop", "join-admission", "drain", "reconfigure", "rotate-credential", "suspend", "revoke").contains(kind)) { terminal = false; diagnostics.accept("unknown_control_command"); break; }
+            if (!Set.of("noop", "join-admission", "drain", "reconfigure", "rotate-credential", "suspend", "revoke").contains(kind)) { terminal = false; diagnostics.accept("unknown_control_command"); continue; }
             if (kind.equals("join-admission") && state.has("discardedAdmissions") && state.getAsJsonArray("discardedAdmissions").contains(admissionMarker(command))) continue;
             long now = System.currentTimeMillis();
             if (page.has("serverTime")) try { now = Math.max(now, java.time.Instant.parse(page.get("serverTime").getAsString()).toEpochMilli()); } catch (RuntimeException ignored) {}
@@ -201,7 +201,7 @@ public final class ProviderClient implements AutoCloseable {
                     recordAdmissionFailure(command, "expired"); removePendingAdmission(command); save(); continue;
                 }
             }
-            if (!ControlValidator.valid(command, registration("instanceId"), registration("serviceId"), now)) { terminal = false; diagnostics.accept("invalid_control_command"); break; }
+            if (!ControlValidator.valid(command, registration("instanceId"), registration("serviceId"), now)) { terminal = false; diagnostics.accept("invalid_control_command"); continue; }
             if (kind.equals("join-admission")) {
                 if (!state.has("pendingAdmissions")) state.add("pendingAdmissions", new JsonArray());
                 JsonArray pending = state.getAsJsonArray("pendingAdmissions");
@@ -209,7 +209,7 @@ public final class ProviderClient implements AutoCloseable {
                 if (!pending.contains(marker)) { if (pending.size() >= 100) throw new IOException("Pending admission limit"); pending.add(marker); save(); }
             }
             ProviderTransport.ApplyResult result = transport.applyControl(command.deepCopy()).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            if (result == ProviderTransport.ApplyResult.PENDING) { terminal = false; break; }
+            if (result == ProviderTransport.ApplyResult.PENDING) { terminal = false; continue; }
             removePendingAdmission(command); save();
         }
         if (terminal && !commands.isEmpty() && page.has("cursor")) {
