@@ -21,6 +21,9 @@ final class ProviderContract {
         }
     }
     static Object[] contextValues(JsonObject context) {
-        List<String> values = new ArrayList<>(); for (JsonElement key : SCHEMA.getAsJsonArray("x-context-order")) values.add(context.get(key.getAsString()).getAsString()); return values.toArray();
+        List<String> values = new ArrayList<>();
+        for (JsonElement key : SCHEMA.getAsJsonArray("x-context-order")) values.add(context.get(key.getAsString()).getAsString());
+        if (SCHEMA.has("x-optional-context-order")) for (JsonElement key : SCHEMA.getAsJsonArray("x-optional-context-order")) if (context.has(key.getAsString())) values.add(context.get(key.getAsString()).getAsString());
+        return values.toArray();
     }
 }

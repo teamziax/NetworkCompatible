@@ -52,6 +52,12 @@ public final class ProviderCrypto {
         } catch (GeneralSecurityException | RuntimeException e) { return false; }
     }
     public static String contextDigest(JsonObject c) { return base64(digest(array(ProviderContract.contextValues(c)))); }
+    public static String tagsDigest(Map<String, String> tags) {
+        if (tags == null || tags.isEmpty()) return null;
+        StringJoiner entries = new StringJoiner(",", "[", "]");
+        new TreeMap<>(tags).forEach((key, value) -> entries.add("[" + quote(key) + "," + quote(value) + "]"));
+        return base64(digest(entries.toString()));
+    }
     public static String proof(JsonObject c, String nonce, String intent) { return array(PROTOCOL, "complete", c.get("audience").getAsString(), c.get("challengeId").getAsString(), c.get("nonce").getAsString(), c.get("thumbprint").getAsString(), c.get("contextDigest").getAsString(), c.get("expiresAt").getAsLong(), nonce, intent); }
     public static boolean meetsDifficulty(byte[] bytes, int bits) { if (bits < 0 || bits > 24) return false; for (int i = 0; i < bits; i++) if ((bytes[i / 8] & (128 >> (i % 8))) != 0) return false; return true; }
     public static String request(String audience, String method, String path, long timestamp, String instance, String key, String intent, long generation, long sequence, String body) { return array(PROTOCOL, SIGNATURE, audience, method, path, timestamp, instance, key, intent, generation, sequence, base64(digest(body))); }

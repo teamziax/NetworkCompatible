@@ -13,9 +13,29 @@ import java.util.function.*;
 
 /** One asynchronous, serialized control lifecycle per backend, never one poller per player. */
 public final class ProviderClient implements AutoCloseable {
-    public record Configuration(URI provider, String profile, String label, String bootstrapGrant, String region, String pool) {
-        public Configuration { Objects.requireNonNull(provider); Objects.requireNonNull(profile); }
-        @Override public String toString() { return "Configuration[provider=" + provider + ", profile=" + profile + "]"; }
+    public static final String NEW_SERVICE = "new-service", ATTACH_INSTANCE = "attach-instance";
+    public static final String ANONYMOUS_PROOF_OF_WORK = "anonymous-proof-of-work", BEARER_TOKEN = "bearer-token", BOOTSTRAP_GRANT = "bootstrap-grant";
+    public record Configuration(URI provider, String profile, String label, String registrationMode, String authorizationScheme,
+                                String authorizationToken, String bootstrapGrant, String region, String pool, Map<String, String> tags) {
+        public Configuration {
+            Objects.requireNonNull(provider); Objects.requireNonNull(profile); Objects.requireNonNull(registrationMode); Objects.requireNonNull(authorizationScheme);
+            tags = tags == null ? Map.of() : Collections.unmodifiableMap(new TreeMap<>(tags));
+            if (!Set.of(NEW_SERVICE, ATTACH_INSTANCE).contains(registrationMode)) throw new IllegalArgumentException("Invalid provider registration mode");
+            if (!Set.of(ANONYMOUS_PROOF_OF_WORK, BEARER_TOKEN, BOOTSTRAP_GRANT).contains(authorizationScheme)) throw new IllegalArgumentException("Invalid provider authorization scheme");
+            if ((BEARER_TOKEN.equals(authorizationScheme)) != (authorizationToken != null && !authorizationToken.isBlank())) throw new IllegalArgumentException("Bearer authorization requires exactly one token");
+            if ((BOOTSTRAP_GRANT.equals(authorizationScheme)) != (bootstrapGrant != null && !bootstrapGrant.isBlank())) throw new IllegalArgumentException("Bootstrap authorization requires exactly one grant");
+            if (ANONYMOUS_PROOF_OF_WORK.equals(authorizationScheme) && !NEW_SERVICE.equals(registrationMode)) throw new IllegalArgumentException("Anonymous proof of work can only create a service");
+            if (BOOTSTRAP_GRANT.equals(authorizationScheme) && !ATTACH_INSTANCE.equals(registrationMode)) throw new IllegalArgumentException("Bootstrap grants can only attach an instance");
+            if (ATTACH_INSTANCE.equals(registrationMode) && (region == null || region.isBlank() || pool == null || pool.isBlank())) throw new IllegalArgumentException("Attached instances require region and pool");
+            if ((region == null) != (pool == null) || (!tags.isEmpty() && region == null)) throw new IllegalArgumentException("Provider placement requires region and pool together");
+            if (tags.size() > 16 || tags.entrySet().stream().anyMatch(e -> !e.getKey().matches("[A-Za-z0-9_.-]{1,32}") || e.getValue() == null || !e.getValue().equals(e.getValue().trim()) || e.getValue().isEmpty() || e.getValue().length() > 64)) throw new IllegalArgumentException("Invalid provider placement tags");
+        }
+        /** Compatibility constructor for the original anonymous/grant configuration. */
+        public Configuration(URI provider, String profile, String label, String bootstrapGrant, String region, String pool) {
+            this(provider, profile, label, bootstrapGrant == null ? NEW_SERVICE : ATTACH_INSTANCE,
+                bootstrapGrant == null ? ANONYMOUS_PROOF_OF_WORK : BOOTSTRAP_GRANT, null, bootstrapGrant, region, pool, Map.of());
+        }
+        @Override public String toString() { return "Configuration[provider=" + provider + ", profile=" + profile + ", registrationMode=" + registrationMode + ", authorizationScheme=" + authorizationScheme + "]"; }
     }
     public record Health(boolean healthy, int capacity, double load, String protocolVersion, String build) {
         public Health { if (capacity < 0 || capacity > 1000000 || !Double.isFinite(load) || load < 0 || load > 1 || protocolVersion == null) throw new IllegalArgumentException("Invalid health"); }
@@ -33,7 +53,7 @@ public final class ProviderClient implements AutoCloseable {
     private final Supplier<Health> healthSupplier;
     private final Consumer<String> diagnostics;
     private final String origin;
-    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> { Thread t = new Thread(r, "warden-provider"); t.setDaemon(true); return t; });
+    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> { Thread t = new Thread(r, "nethernet-provider"); t.setDaemon(true); return t; });
     private final HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(10)).build();
     private final AtomicReference<ServerStatus> explicitStatus = new AtomicReference<>();
     private final AtomicBoolean refreshQueued = new AtomicBoolean();
@@ -55,7 +75,7 @@ public final class ProviderClient implements AutoCloseable {
     }
     public CompletableFuture<JsonObject> start() { return submit(() -> {
         if (started) throw new IllegalStateException("Already started");
-        discovery = exchange(URI.create(origin + "/.well-known/nethernet-provider"), "GET", null, false, null);
+        discovery = exchange(URI.create(origin + "/.well-known/nethernet-provider"), "GET", null, false, null, null);
         validateDiscovery(); state = store.read();
         if (state.has("provider") && !origin.equals(state.get("provider").getAsString())) throw new IOException("State belongs to another provider; use a separate directory");
         if (!state.has("privateKey")) {
@@ -104,9 +124,15 @@ public final class ProviderClient implements AutoCloseable {
     private void validateDiscovery() throws IOException {
         ProviderContract.require("discovery", discovery);
         if (!origin.equals(discovery.get("controlOrigin").getAsString()) || !origin.equals(discovery.get("provider").getAsString())) throw new IOException("Discovery provider mismatch");
-        for (String[] pair : List.of(new String[]{"protocols", ProviderCrypto.PROTOCOL}, new String[]{"signatures", ProviderCrypto.SIGNATURE}, new String[]{"profiles", config.profile()}, new String[]{"modes", config.bootstrapGrant() == null ? "new-service" : "attach-instance"})) {
+        for (String[] pair : List.of(new String[]{"protocols", ProviderCrypto.PROTOCOL}, new String[]{"signatures", ProviderCrypto.SIGNATURE}, new String[]{"profiles", config.profile()}, new String[]{"modes", config.registrationMode()})) {
             if (!discovery.getAsJsonArray(pair[0]).contains(new JsonPrimitive(pair[1]))) throw new IOException("Unsupported required provider capability: " + pair[0]);
         }
+        boolean authorizationSupported = false;
+        for (JsonElement item : discovery.getAsJsonObject("authorization").getAsJsonArray("schemes")) {
+            JsonObject scheme = item.getAsJsonObject();
+            if (config.authorizationScheme().equals(scheme.get("scheme").getAsString()) && scheme.getAsJsonArray("modes").contains(new JsonPrimitive(config.registrationMode()))) authorizationSupported = true;
+        }
+        if (!authorizationSupported || !"Authorization".equals(discovery.getAsJsonObject("authorization").get("header").getAsString())) throw new IOException("Unsupported provider authorization");
         for (var op : discovery.getAsJsonObject("operations").entrySet()) trusted(URI.create(op.getValue().getAsString()));
         intervalMs = discovery.getAsJsonObject("limits").get("heartbeatIntervalMs").getAsLong();
         if (intervalMs < 1000 || intervalMs > 30000) throw new IOException("Unsupported heartbeat interval");
@@ -122,7 +148,7 @@ public final class ProviderClient implements AutoCloseable {
         String intent = UUID.randomUUID().toString(); JsonObject completion = new JsonObject();
         completion.addProperty("protocol", ProviderCrypto.PROTOCOL); completion.addProperty("challengeId", challenge.get("challengeId").getAsString());
         completion.addProperty("proofNonce", "0"); completion.addProperty("idempotencyKey", intent); completion.addProperty("signature", ProviderCrypto.sign(key, ProviderCrypto.proof(challenge, "0", intent)));
-        JsonObject recovered = unsigned("complete", completion);
+        JsonObject recovered = unsigned("complete", completion); validateRegistration(recovered);
         if (state.getAsJsonObject("registration").has("pendingAction")) recovered.add("pendingAction", state.getAsJsonObject("registration").get("pendingAction"));
         state.add("registration", recovered); state.addProperty("generation", recovered.get("leaseGeneration").getAsLong());
         // Sequence is monotonic within a generation; the previous durable reservation is retained.
@@ -136,26 +162,46 @@ public final class ProviderClient implements AutoCloseable {
             try { challenge = unsigned("recover", recovery); }
             catch (ProviderException e) { if (e.status != 403) throw e; challenge = state.getAsJsonObject("challenge"); }
         } else {
-            JsonObject request = new JsonObject(); request.addProperty("protocol", ProviderCrypto.PROTOCOL); request.addProperty("mode", config.bootstrapGrant() == null ? "new-service" : "attach-instance");
+            JsonObject request = new JsonObject(); request.addProperty("protocol", ProviderCrypto.PROTOCOL); request.addProperty("mode", config.registrationMode());
             request.addProperty("profile", config.profile()); request.add("publicKeyJwk", state.get("publicKeyJwk")); if (config.label() != null) request.addProperty("label", config.label());
-            if (config.bootstrapGrant() != null) { request.addProperty("bootstrapGrant", config.bootstrapGrant()); JsonObject p = new JsonObject(); p.addProperty("region", config.region()); p.addProperty("pool", config.pool()); request.add("placement", p); }
-            challenge = unsigned("challenges", request); state.add("challenge", challenge); save();
+            JsonObject authorization = new JsonObject(); authorization.addProperty("scheme", config.authorizationScheme()); request.add("authorization", authorization);
+            if (config.bootstrapGrant() != null) request.addProperty("bootstrapGrant", config.bootstrapGrant());
+            if (config.region() != null) { JsonObject p = new JsonObject(); p.addProperty("region", config.region()); p.addProperty("pool", config.pool()); if (!config.tags().isEmpty()) p.add("tags", JSON.toJsonTree(config.tags())); request.add("placement", p); }
+            challenge = unsigned("challenges", request, config.authorizationToken()); state.add("challenge", challenge); save();
         }
         ProviderContract.require("challenge", challenge);
         if (!ProviderCrypto.PROTOCOL.equals(challenge.get("protocol").getAsString()) || !ProviderCrypto.SIGNATURE.equals(challenge.get("signature").getAsString()) || !origin.equals(challenge.get("audience").getAsString()) || !ProviderCrypto.thumbprint(state.getAsJsonObject("publicKeyJwk")).equals(challenge.get("thumbprint").getAsString()) || !ProviderCrypto.contextDigest(challenge.getAsJsonObject("context")).equals(challenge.get("contextDigest").getAsString())) throw new IOException("Unbound registration challenge");
-        if (!config.profile().equals(challenge.getAsJsonObject("context").get("profile").getAsString())) throw new IOException("Challenge profile changed");
+        JsonObject context = challenge.getAsJsonObject("context");
+        if (!config.profile().equals(context.get("profile").getAsString()) || !config.registrationMode().equals(context.get("mode").getAsString())) throw new IOException("Challenge registration context changed");
+        String expectedTagsDigest = ProviderCrypto.tagsDigest(config.tags());
+        if (config.region() == null) {
+            if (!context.get("region").getAsString().isEmpty() || !context.get("pool").getAsString().isEmpty() || context.has("tagsDigest")) throw new IOException("Challenge placement changed");
+        } else if (!config.region().equals(context.get("region").getAsString()) || !config.pool().equals(context.get("pool").getAsString()) ||
+            (expectedTagsDigest == null ? context.has("tagsDigest") : !context.has("tagsDigest") || !expectedTagsDigest.equals(context.get("tagsDigest").getAsString()))) throw new IOException("Challenge placement changed");
+        if (challenge.has("authorization") && !config.authorizationScheme().equals(challenge.getAsJsonObject("authorization").get("scheme").getAsString())) throw new IOException("Challenge authorization changed");
+        if (BEARER_TOKEN.equals(config.authorizationScheme()) && (!challenge.has("authorization") || challenge.getAsJsonObject("authorization").get("reference").getAsString().isBlank())) throw new IOException("Bearer challenge omitted its authority reference");
         String intent = UUID.randomUUID().toString(), nonce = null;
         int bits = challenge.getAsJsonObject("pow").get("difficulty").getAsInt();
         if (!"sha256-leading-zero-bits-v0".equals(challenge.getAsJsonObject("pow").get("algorithm").getAsString()) || bits < 0 || bits > 24) throw new IOException("Unsupported proof of work");
+        if (BEARER_TOKEN.equals(config.authorizationScheme()) && bits != 0) throw new IOException("Bearer-authorized registration unexpectedly requires proof of work");
         long deadline = challenge.get("expiresAt").getAsLong();
         for (long i = 0; System.currentTimeMillis() < deadline; i++) { String candidate = Long.toString(i); if (ProviderCrypto.meetsDifficulty(ProviderCrypto.digest(ProviderCrypto.proof(challenge, candidate, intent)), bits)) { nonce = candidate; break; } }
         if (nonce == null) throw new IOException("Challenge expired before proof completed");
         JsonObject completion = new JsonObject(); completion.addProperty("protocol", ProviderCrypto.PROTOCOL); completion.addProperty("challengeId", challenge.get("challengeId").getAsString()); completion.addProperty("proofNonce", nonce); completion.addProperty("idempotencyKey", intent); completion.addProperty("signature", ProviderCrypto.sign(privateKey, ProviderCrypto.proof(challenge, nonce, intent)));
-        JsonObject registration = unsigned("complete", completion); ProviderContract.require("registration", registration);
+        JsonObject registration = unsigned("complete", completion); ProviderContract.require("registration", registration); validateRegistration(registration);
         state.add("registration", registration); state.addProperty("generation", registration.get("leaseGeneration").getAsLong()); state.addProperty("sequence", 0);
         state.add("ticketKeys", new JsonArray());
         if (registration.has("ticketKey")) { state.getAsJsonArray("ticketKeys").add(registration.remove("ticketKey")); }
         save();
+    }
+    private void validateRegistration(JsonObject registration) throws IOException {
+        if (!origin.equals(registration.get("provider").getAsString()) || !config.profile().equals(registration.get("profile").getAsString())) throw new IOException("Registration provider or profile changed");
+        JsonObject placement = registration.getAsJsonObject("placement");
+        String expectedRegion = config.region() == null ? "" : config.region(), expectedPool = config.pool() == null ? "" : config.pool();
+        if (!expectedRegion.equals(placement.get("region").getAsString()) || !expectedPool.equals(placement.get("pool").getAsString())) throw new IOException("Registration placement changed");
+        JsonObject expectedTags = JSON.toJsonTree(config.tags()).getAsJsonObject();
+        JsonObject actualTags = placement.has("tags") ? placement.getAsJsonObject("tags") : new JsonObject();
+        if (!expectedTags.equals(actualTags)) throw new IOException("Registration placement tags changed");
     }
     private void installKeys() throws Exception {
         if (!state.has("ticketKeys")) state.add("ticketKeys", new JsonArray());
@@ -318,24 +364,26 @@ public final class ProviderClient implements AutoCloseable {
         JsonObject retire = new JsonObject(); retire.addProperty("keyId", oldKey); signed("retire", "POST", retire); return result;
     }); }
     public CompletableFuture<Void> drain() { return submit(() -> { signed("drain", "POST", new JsonObject()); transport.drain().toCompletableFuture().get(10, TimeUnit.SECONDS); started = false; return null; }); }
-    private JsonObject unsigned(String op, JsonObject body) throws Exception { return exchange(operation(op), "POST", JSON.toJson(body), false, null); }
+    private JsonObject unsigned(String op, JsonObject body) throws Exception { return unsigned(op, body, null); }
+    private JsonObject unsigned(String op, JsonObject body, String bearerToken) throws Exception { return exchange(operation(op), "POST", JSON.toJson(body), false, null, bearerToken); }
     private JsonObject signed(String op, String method, JsonObject body) throws Exception { return signed(op, method, body, UUID.randomUUID().toString()); }
     private JsonObject signed(String op, String method, JsonObject body, String intent) throws Exception {
         long sequence = state.has("sequence") ? state.get("sequence").getAsLong() + 1 : 1; state.addProperty("sequence", sequence); save();
         URI uri = operation(op);
         if (op.equals("control") && state.has("cursor")) uri = URI.create(uri + "?cursor=" + java.net.URLEncoder.encode(state.get("cursor").getAsString(), java.nio.charset.StandardCharsets.UTF_8));
-        return exchange(uri, method, body == null ? null : JSON.toJson(body), true, intent);
+        return exchange(uri, method, body == null ? null : JSON.toJson(body), true, intent, null);
     }
     private URI operation(String op) throws IOException { if (!discovery.getAsJsonObject("operations").has(op)) throw new IOException("Missing provider operation: " + op); return trusted(URI.create(discovery.getAsJsonObject("operations").get(op).getAsString())); }
     private URI trusted(URI uri) throws IOException {
         URI authority = URI.create(uri.getScheme() + "://" + uri.getRawAuthority());
         if (!ProviderCrypto.origin(authority).equals(origin) || uri.getUserInfo() != null || uri.getFragment() != null) throw new IOException("Untrusted provider operation"); return uri;
     }
-    private JsonObject exchange(URI uri, String method, String body, boolean signed, String intent) throws Exception {
+    private JsonObject exchange(URI uri, String method, String body, boolean signed, String intent, String bearerToken) throws Exception {
         trusted(uri); String raw = body == null ? "" : body;
         for (int attempt = 0; attempt < 3; attempt++) {
             HttpRequest.Builder b = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(15)).header("accept", "application/json").method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
             if (body != null) b.header("content-type", "application/json");
+            if (bearerToken != null) b.header("authorization", "Bearer " + bearerToken);
             if (signed) {
                 long now = System.currentTimeMillis(), generation = state.get("generation").getAsLong(), sequence = state.get("sequence").getAsLong();
                 String path = uri.getRawPath() + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());

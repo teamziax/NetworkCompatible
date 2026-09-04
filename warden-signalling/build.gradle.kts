@@ -1,5 +1,5 @@
 plugins { id("com.gradleup.nmcp") }
-description = "Provider registration and Warden control client"
+description = "NetherNet provider registration and Warden-compatible control client"
 version = providers.gradleProperty("wardenVersion").getOrElse("0.1.0-registration-dev")
 java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
 dependencies {
@@ -40,7 +40,7 @@ tasks.register<JavaExec>("providerBench") {
     dependsOn(tasks.testClasses)
     classpath = sourceSets.test.get().runtimeClasspath
     mainClass.set("org.cloudburstmc.netty.warden.WardenProviderBench")
-    listOf("providerOrigin", "providerState", "providerMode", "providerGrantFile", "providerHoldSeconds").forEach { name ->
+    listOf("providerOrigin", "providerState", "providerMode", "providerGrantFile", "providerToken", "providerRegistrationMode", "providerRegion", "providerPool", "providerTags", "providerHoldSeconds").forEach { name ->
         providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
     }
 }

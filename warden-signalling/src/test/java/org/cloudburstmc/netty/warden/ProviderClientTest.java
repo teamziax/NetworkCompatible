@@ -11,6 +11,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProviderClientTest {
+    @Test void usesProviderNeutralBearerAuthorizationWithoutPowOrPersistingTheToken(@TempDir Path path) throws Exception {
+        try (IndependentProviderStub stub = new IndependentProviderStub()) {
+            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Hosted customer",
+                ProviderClient.NEW_SERVICE, ProviderClient.BEARER_TOKEN, "independent-provider-token", null, "EU", "customers", Map.of("plan", "premium"));
+            ProviderClient client = new ProviderClient(config, new ProviderStateStore(path), new FakeTransport(), () -> null,
+                () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {});
+            try {
+                JsonObject registration = client.start().get(20, TimeUnit.SECONDS);
+                assertEquals("example-machine-1", registration.get("instanceId").getAsString());
+                assertEquals("Bearer independent-provider-token", stub.challengeAuthorization);
+                assertEquals(0, stub.challengeDifficulty);
+                assertFalse(java.nio.file.Files.readString(path.resolve("provider-state.json")).contains("independent-provider-token"));
+                assertFalse(config.toString().contains("independent-provider-token"));
+            } finally { client.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+        }
+    }
+
     @Test void refreshesAnExpiredOptionalClaimWithoutBlockingReadiness(@TempDir Path path) throws Exception {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             stub.optionalClaim = true;

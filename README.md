@@ -6,6 +6,12 @@ You can join the [Discord](https://discord.gg/5z4GuSnqmQ) for help with this for
 
 The new package `netty-transport-nethernet` is also included, which provides support for the Nethernet protocol. This is achieved using a JNI wrapper for the native WebRTC library.
 
+The [`netty-warden-signalling`](warden-signalling) module also contains the Java
+client and conformance resources for the open, vendor-neutral
+[NetherNet provider registration v0 specification](docs/nethernet-provider-registration-v0.md).
+Despite the compatibility module name, discovery supports any conforming provider
+origin; Warden is the default reference implementation.
+
 ## Package Specific Information
 
 See the respective README files for each transport library for more information:
