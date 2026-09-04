@@ -44,6 +44,56 @@ class NativeAdmissionIntegrationTest {
             assertEquals(port,packet.getPort());assertEquals(0x1c,reply[0]);assertEquals(12345,ByteBuffer.wrap(reply).getLong(1));
         }
     }
+    @Test @Timeout(20) void firstAuthenticatedDatagramGetsMatchingResponseWithoutRetry() throws Exception {
+        var id = identity(); var loopback = InetAddress.getByName("127.0.0.1"); int port = 49199;
+        var validator = new StatelessAdmissionValidator(FakeWarden.AUDIENCE, 60_000);
+        validator.installKeys(List.of(new StatelessAdmissionValidator.TicketKey("K001", FakeWarden.SECRET)));
+        var group = new DefaultEventLoopGroup(1);
+        var endpoint = new NativeAdmissionServerChannel(id, validator, new AdmissionGate.Limits(2, 4, 1, 10_000));
+        try (var socket = new DatagramSocket(new InetSocketAddress(loopback, 0));
+             var client = PeerConnection.createPeer(PeerConnectionConfiguration.DEFAULT.withDisableAutoNegotiation(true).withBindAddress(loopback), Runnable::run)) {
+            new ServerBootstrap().group(group).channelFactory(() -> endpoint)
+                .childHandler(new ChannelInboundHandlerAdapter()).bind(loopback, port).sync();
+            client.createDataChannel("ReliableDataChannel");
+            client.setLocalDescription("offer", "singleCheckClient", "p".repeat(32));
+            var answer = FakeWarden.answer(client.localDescription(), id.fingerprint(), port,
+                System.currentTimeMillis() + 30_000, FakeWarden.AUDIENCE, false);
+            // Never apply the answer to the native client: only this socket sends one check.
+            byte[] request = nominatedBinding(answer.token() + ":singleCheckClient", answer.password());
+            socket.setSoTimeout(2000);
+            long started = System.nanoTime();
+            socket.send(new DatagramPacket(request, request.length, loopback, port));
+            byte[] bytes = new byte[2048]; var response = new DatagramPacket(bytes, bytes.length);
+            socket.receive(response);
+            double elapsedMs = (System.nanoTime() - started) / 1_000_000.0;
+            assertEquals(loopback, response.getAddress()); assertEquals(port, response.getPort());
+            assertEquals(0x0101, Short.toUnsignedInt(ByteBuffer.wrap(bytes).getShort()));
+            assertArrayEquals(Arrays.copyOfRange(request, 8, 20), Arrays.copyOfRange(bytes, 8, 20));
+            assertEquals(1, endpoint.creationAttempts()); assertEquals(1, endpoint.nativeStats()[3]);
+            System.out.printf(Locale.ROOT, "first-stun PASS requestsSent=1 matchingSuccess=true responseMs=%.3f%n", elapsedMs);
+        } finally {
+            endpoint.close().awaitUninterruptibly(); endpoint.termination().toCompletableFuture().get(6, TimeUnit.SECONDS);
+            group.shutdownGracefully(0, 1, TimeUnit.SECONDS).sync();
+        }
+    }
+    private static byte[] nominatedBinding(String username, String password) throws Exception {
+        byte[] minimal = AdmissionFixture.binding(username, password);
+        int integrityOffset = minimal.length - 24;
+        ByteBuffer packet = ByteBuffer.allocate(minimal.length + 24);
+        packet.put(minimal, 0, integrityOffset);
+        packet.putShort((short)0x24).putShort((short)4).putInt(1853693695);
+        packet.putShort((short)0x802a).putShort((short)8).putLong(42);
+        packet.putShort((short)0x25).putShort((short)0);
+        int signedLength = packet.position();
+        packet.putShort((short)8).putShort((short)20);
+        packet.putShort(2, (short)(packet.capacity() - 20));
+        byte[] transaction = new byte[12]; new java.security.SecureRandom().nextBytes(transaction);
+        System.arraycopy(transaction, 0, packet.array(), 8, transaction.length);
+        var mac = javax.crypto.Mac.getInstance("HmacSHA1");
+        mac.init(new javax.crypto.spec.SecretKeySpec(password.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA1"));
+        packet.put(mac.doFinal(Arrays.copyOf(packet.array(), signedLength)));
+        return packet.array();
+    }
     @Test @Timeout(45) void noControlLazyJoinBothChannelsReplayAndCleanup() throws Exception {
         var id = identity(); var loopback = InetAddress.getByName("127.0.0.1"); int port = 49190;
         var validator = new StatelessAdmissionValidator(FakeWarden.AUDIENCE,60_000);

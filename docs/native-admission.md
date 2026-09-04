@@ -45,7 +45,7 @@ STUN fixture. Fixture keys are public test material.
 - No per-join control input or prestaged client state; zero initial host peers.
 - Tampered, expired, wrong-host, wrong-client-ufrag and bad-STUN-integrity packets
   produce zero native creation attempts, agents, promoted tuples and reservations.
-- One lazy peer, natural ICE retransmission, conflicting-tuple replay rejection,
+- One lazy peer, first-request STUN response without a client retry, conflicting-tuple replay rejection,
   closed replay tombstones, concurrent duplicate reservation and cleanup.
 - Fixed high UDP port 49190, duplicate listener refusal and socket reuse after
   close. Existing RakNet responds to unconnected pings on UDP 49191 while the
@@ -59,7 +59,7 @@ repository's `native-test/README.md` for that distinct gate.
 
 ## Limits and lifecycle
 
-Defaults: 1,024 live reservations, 64 pending creations, 8,192 total replay
+Defaults: 1,024 live reservations, 1,024 pending creations, 8,192 total replay
 claims, 15-second handshake deadline, 8 background key epochs. No live/tombstone
 eviction to admit new traffic: capacity exhaustion refuses admission. Creation
 failure is terminal until token expiry. A periodic sweep retires closed claims.
@@ -76,6 +76,23 @@ application message is submitted. Backpressure keeps Netty ownership until send
 or rejects the write. Overflow closes the child; callback data is copied before
 native storage expires. A bounded periodic pump performs native creation and
 Netty delivery, never the raw mux callback.
+
+The first authenticated STUN request is retained with its reservation (at most
+2048 bytes per pending admission). After peer configuration it is transferred
+once to the native mux replay queue, which holds at most 1,024 requests. The mux
+thread re-runs the admission guard and ordinary ICE processing, preserving the
+original source tuple and transaction ID. Expiry before creation, cancellation,
+creation failure and close release the retained packet; listener removal clears
+native queued packets. No client retry is needed to obtain the first response.
+The native single-datagram regression sends exactly one nominated Binding request
+and requires a matching success response from the bound endpoint. Its printed
+latency is a local measurement, not stock-client or gameplay evidence. Mux
+processed-packet and gate retransmission counters include the internal replay.
+Each queue has a maximum 2 MiB of packet payload at these defaults, plus metadata
+and temporary handoff copies. Pending-limit rejections emit an aggregate warning
+on the owner event loop at most once every five seconds, containing the count at
+rejection, configured limit, and rejected requests since the last warning. Raw
+ingress never calls a logger or logs client/token material.
 
 Reliable traffic is ordered/reliable; unreliable traffic is unordered with zero
 retransmissions. Unreliable application messages must fit a single 9,999-byte

@@ -11,17 +11,19 @@ public final class AdmissionGate {
             if (sessions < 1 || sessions > 65536 || claims < sessions || claims > 262144 || pending < 1 || pending > sessions || handshakeMillis < 100 || handshakeMillis > 120_000)
                 throw new IllegalArgumentException("Admission limits");
         }
-        public static Limits defaults() { return new Limits(1024, 8192, 64, 15_000); }
+        public static Limits defaults() { return new Limits(1024, 8192, 1024, 15_000); }
     }
     public static final class Reservation {
         private VerifiedAdmission admission;
+        private byte[] initialPacket;
         private final String tokenId;
         private final InetSocketAddress tuple;
         private final long expiresAt, acceptedNanos;
         private boolean ready, connected, closed;
-        private Reservation(VerifiedAdmission admission, InetSocketAddress tuple, long nanos) {
+        private Reservation(VerifiedAdmission admission, InetSocketAddress tuple, long nanos, byte[] packet) {
             this.admission = admission; this.tokenId = admission.tokenId(); this.tuple = tuple;
             this.expiresAt = admission.expiresAt(); this.acceptedNanos = nanos;
+            this.initialPacket = packet.clone();
         }
         public String tokenId() { return tokenId; }
         public InetSocketAddress tuple() { return tuple; }
@@ -29,6 +31,8 @@ public final class AdmissionGate {
         @Override public String toString() { return "Reservation[tokenId=" + tokenId + "]"; }
     }
     public record Stats(int sessions, int pending, int claims, long invalid, long replayRejected, long capacityRejected, long accepted, long retransmissions) {}
+    public record PendingLimitWarning(int pending, int limit, long rejected) {}
+    private static final long WARNING_INTERVAL_NANOS = 5_000_000_000L;
     private final Limits limits;
     private final AdmissionValidator validator;
     private final Map<String, Reservation> claims = new HashMap<>();
@@ -36,6 +40,9 @@ public final class AdmissionGate {
     private int pending;
     private boolean draining, closed;
     private long invalid, replayRejected, capacityRejected, accepted, retransmissions;
+    private long pendingLimitRejected, lastPendingWarningNanos;
+    private int pendingAtRejection;
+    private boolean pendingWarningEmitted;
 
     public AdmissionGate(Limits limits, AdmissionValidator validator) { this.limits = Objects.requireNonNull(limits); this.validator = Objects.requireNonNull(validator); }
 
@@ -60,25 +67,36 @@ public final class AdmissionGate {
         VerifiedAdmission a = validator.validate(packet, binding, nowMillis);
         if (a == null) { invalid++; return false; }
         if (claims.containsKey(a.tokenId())) { replayRejected++; return false; }
-        if (draining || tuples.size() >= limits.sessions() || pending >= limits.pending() || claims.size() >= limits.claims()) { capacityRejected++; return false; }
-        Reservation r = new Reservation(a, tuple, nowNanos);
+        if (draining) { capacityRejected++; return false; }
+        if (pending >= limits.pending()) {
+            capacityRejected++; pendingLimitRejected++; pendingAtRejection = pending;
+            return false;
+        }
+        if (tuples.size() >= limits.sessions() || claims.size() >= limits.claims()) { capacityRejected++; return false; }
+        // Only authenticated, capacity-admitted requests are retained. The parser
+        // caps each at 2048 bytes and pending reservations bound the number held.
+        Reservation r = new Reservation(a, tuple, nowNanos, packet);
         claims.put(r.tokenId, r); tuples.put(tuple, r); pending++; accepted++;
         try { enqueue.accept(r); }
         catch (RuntimeException rejected) { finish(r); capacityRejected++; }
-        return false; // first packet is dropped; the stock ICE retransmission is routed only after creation
+        return false; // defer this packet until creation; never wait for a client retry
     }
 
     public synchronized VerifiedAdmission admission(Reservation r) { return current(r) ? r.admission : null; }
-    public synchronized boolean ready(Reservation r) {
-        if (!current(r)) return false;
-        if (!r.ready) { r.ready = true; pending--; }
-        return true;
+    /** Activate and transfer the first packet once, atomically releasing its pending slot. */
+    public synchronized byte[] ready(Reservation r) {
+        if (!current(r) || r.ready) return null;
+        byte[] packet = r.initialPacket;
+        r.initialPacket = null;
+        r.ready = true;
+        pending--;
+        return packet;
     }
     public synchronized void connected(Reservation r) { if (current(r)) r.connected = true; }
     public synchronized boolean finish(Reservation r) {
         if (!current(r)) return false;
         if (!r.ready) pending--;
-        tuples.remove(r.tuple); r.closed = true; r.admission = null; // retain only a bounded replay tombstone
+        tuples.remove(r.tuple); r.closed = true; r.admission = null; r.initialPacket = null; // retain only a bounded replay tombstone
         return true;
     }
     private boolean current(Reservation r) { return !r.closed && claims.get(r.tokenId) == r; }
@@ -99,4 +117,11 @@ public final class AdmissionGate {
         claims.clear(); return active;
     }
     public synchronized Stats stats() { return new Stats(tuples.size(), pending, claims.size(), invalid, replayRejected, capacityRejected, accepted, retransmissions); }
+    /** Drain an aggregate on the owner thread; never invoke a logger in raw ingress. */
+    public synchronized PendingLimitWarning pollPendingLimitWarning(long nowNanos) {
+        if (pendingLimitRejected == 0 || (pendingWarningEmitted && nowNanos - lastPendingWarningNanos < WARNING_INTERVAL_NANOS)) return null;
+        var warning = new PendingLimitWarning(pendingAtRejection, limits.pending(), pendingLimitRejected);
+        pendingLimitRejected = 0; lastPendingWarningNanos = nowNanos; pendingWarningEmitted = true;
+        return warning;
+    }
 }
