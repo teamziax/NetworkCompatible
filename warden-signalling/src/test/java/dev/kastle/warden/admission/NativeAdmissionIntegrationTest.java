@@ -169,4 +169,47 @@ class NativeAdmissionIntegrationTest {
         } finally { if (transport != null) transport.close().toCompletableFuture().get(5,TimeUnit.SECONDS);group.shutdownGracefully(0,1,TimeUnit.SECONDS).sync(); }
     }
 
+    @Test @Timeout(40) void simultaneousClientsRespectNativeCapacityUntilActualTeardown() throws Exception {
+        var id=identity();var group=new DefaultEventLoopGroup(2);var clients=new ArrayList<PeerConnection>();
+        var children=new CopyOnWriteArrayList<AdmittedNetherNetChildChannel>();
+        var validator=new StatelessAdmissionValidator(FakeWarden.AUDIENCE,60000);
+        validator.installKeys(List.of(new StatelessAdmissionValidator.TicketKey("K001",FakeWarden.SECRET)));
+        var endpoint=new NativeAdmissionServerChannel(id,validator,new AdmissionGate.Limits(2,4,2,10000));
+        try {
+            new ServerBootstrap().group(group).channelFactory(()->endpoint).childHandler(new ChannelInitializer<AdmittedNetherNetChildChannel>() {
+                @Override protected void initChannel(AdmittedNetherNetChildChannel child) { children.add(child); }
+            }).bind("127.0.0.1",49198).sync();
+            var answers=new ArrayList<FakeWarden.Answer>();var opens=new AtomicIntegerArray(3);
+            for(int i=0;i<3;i++) {
+                final int index=i;
+                var client=PeerConnection.createPeer(PeerConnectionConfiguration.DEFAULT.withDisableAutoNegotiation(true).withBindAddress(InetAddress.getByName("127.0.0.1")),Runnable::run);
+                clients.add(client);
+                for(boolean reliable:new boolean[]{true,false}) {
+                    var dc=client.createDataChannel(reliable?"ReliableDataChannel":"UnreliableDataChannel",DataChannelInitSettings.DEFAULT.withReliability(new DataChannelReliability(!reliable,!reliable,0,0)));
+                    dc.onOpen.register(ignored->opens.incrementAndGet(index));
+                }
+                client.setLocalDescription("offer","multiClient"+i,"p".repeat(32));
+                answers.add(FakeWarden.answer(client.localDescription(),id.fingerprint(),49198,System.currentTimeMillis()+30000,FakeWarden.AUDIENCE,false));
+            }
+            long before=PeerConnection.nativeCreationAttempts();
+            clients.get(0).setRemoteDescription(answers.get(0).sdp(),SessionDescriptionType.ANSWER);
+            clients.get(1).setRemoteDescription(answers.get(1).sdp(),SessionDescriptionType.ANSWER);
+            await(()->opens.get(0)==2 && opens.get(1)==2);
+            assertEquals(2,endpoint.liveNativePeers());assertEquals(2,endpoint.nativeStats()[2]);
+            clients.get(2).setRemoteDescription(answers.get(2).sdp(),SessionDescriptionType.ANSWER);
+            await(()->endpoint.admissionStats().capacityRejected()>0);
+            assertEquals(2,endpoint.creationAttempts());assertEquals(before+2,PeerConnection.nativeCreationAttempts());assertEquals(2,endpoint.admissionStats().claims());
+            var closing=children.get(0);closing.close().sync();closing.nativeTermination().toCompletableFuture().get(5,TimeUnit.SECONDS);
+            // Third client's normal ICE retries can claim the released slot; used tokens remain tombstoned.
+            await(()->{assertTrue(endpoint.nativeStats()[2]<=2);assertTrue(endpoint.liveNativePeers()<=2);return opens.get(2)==2;});
+            assertEquals(3,endpoint.creationAttempts());assertEquals(before+3,PeerConnection.nativeCreationAttempts());
+            assertEquals(2,endpoint.liveNativePeers());assertEquals(2,endpoint.nativeStats()[2]);assertEquals(3,endpoint.admissionStats().claims());
+            System.out.println("native-capacity PASS simultaneousClients=2 thirdRetriesAfterTeardown=true maxNativePeers=2");
+        } finally {
+            for(var client:clients) assertTrue(client.closeAndAwait(Duration.ofSeconds(5)));
+            endpoint.close().awaitUninterruptibly();endpoint.termination().toCompletableFuture().get(6,TimeUnit.SECONDS);
+            group.shutdownGracefully(0,1,TimeUnit.SECONDS).sync();
+        }
+    }
+
 }
