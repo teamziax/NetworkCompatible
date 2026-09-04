@@ -15,6 +15,8 @@ public final class IndependentProviderStub implements AutoCloseable {
     final Map<String, JsonObject> challenges = new HashMap<>(), keys = new HashMap<>();
     JsonObject registration; volatile JsonObject lastHeartbeat;
     volatile int failHeartbeats;
+    volatile long checkInMillis;
+    volatile int controlPolls;
     final java.util.List<JsonObject> events = new java.util.concurrent.CopyOnWriteArrayList<>();
     long generation, sequence;
     volatile int registrations, heartbeats, acknowledgements;
@@ -41,7 +43,7 @@ public final class IndependentProviderStub implements AutoCloseable {
             d.add("protocols", strings(ProviderCrypto.PROTOCOL)); d.add("signatures", strings(ProviderCrypto.SIGNATURE)); d.add("modes", strings("new-service", "attach-instance")); d.add("profiles", strings("example-profile-v0"));
             JsonObject operations = new JsonObject(); for (String op : List.of("challenges", "complete", "recover", "activate", "heartbeat", "host-profile", "readiness", "control", "control/ack", "drain", "rotate", "retire", "ticket-keys", "ticket-keys/ack", "ticket-events", "events")) operations.addProperty(op, origin + "/example/" + op);
             if (optionalClaim) operations.addProperty("claim-action", origin + "/example/claim-action");
-            d.add("operations", operations); JsonObject limits = new JsonObject(); limits.addProperty("heartbeatIntervalMs", 1000); limits.addProperty("maxControlPage", 100); limits.addProperty("leaseMs", 30000); limits.addProperty("maxBodyBytes", 65536); limits.addProperty("clockSkewMs", 60000); d.add("limits", limits);
+            d.add("operations", operations); JsonObject limits = new JsonObject(); limits.addProperty("heartbeatIntervalMs", 1000); if (checkInMillis > 0) limits.addProperty("checkInVersion", 1); limits.addProperty("maxControlPage", 100); limits.addProperty("leaseMs", 30000); limits.addProperty("maxBodyBytes", 65536); limits.addProperty("clockSkewMs", 60000); d.add("limits", limits);
             JsonObject policy = new JsonObject(); policy.addProperty("newServiceClaim", "none"); policy.addProperty("anonymousPow", true); policy.addProperty("attachmentPow", false); d.add("policy", policy); return d;
         }
         if (path.equals("/example/challenges") || path.equals("/example/recover")) {
@@ -69,8 +71,15 @@ public final class IndependentProviderStub implements AutoCloseable {
         switch (path) {
             case "/example/activate" -> { generation++; sequence = 0; draining = false; ok.addProperty("leaseGeneration", generation); ok.addProperty("leaseDeadline", System.currentTimeMillis() + 30000); }
             case "/example/host-profile" -> ok.addProperty("revision", "example-profile-revision");
-            case "/example/heartbeat" -> { if (draining) throw new Failure(403, "draining"); lastHeartbeat = body; heartbeats++; }
-            case "/example/control" -> { ok.add("commands", commands.deepCopy()); ok.addProperty("cursor", "example-cursor"); ok.addProperty("serverTime", java.time.Instant.now().toString()); }
+            case "/example/heartbeat" -> { if (draining) throw new Failure(403, "draining"); lastHeartbeat = body; heartbeats++;
+                if (checkInMillis > 0 && body.has("checkInVersion")) {
+                    long now = System.currentTimeMillis(); JsonObject schedule = new JsonObject();
+                    schedule.addProperty("version", 1); schedule.addProperty("afterMillis", checkInMillis);
+                    schedule.addProperty("nextCheckInAt", now + checkInMillis); schedule.addProperty("leaseExpiresAt", now + checkInMillis + 30000);
+                    schedule.addProperty("minUpdateIntervalMillis", 1000); schedule.addProperty("controlPollAfterMillis", checkInMillis);
+                    ok.add("checkIn", schedule); ok.addProperty("receivedAt", java.time.Instant.ofEpochMilli(now).toString());
+                } }
+            case "/example/control" -> { controlPolls++; ok.add("commands", commands.deepCopy()); ok.addProperty("cursor", "example-cursor"); ok.addProperty("serverTime", java.time.Instant.now().toString()); }
             case "/example/control/ack" -> { acknowledgements++; commands = new JsonArray(); }
             case "/example/readiness" -> { ok.addProperty("routable", heartbeats > 0 && !draining); if (optionalClaim) ok.addProperty("claimAvailable", true); }
             case "/example/claim-action" -> {

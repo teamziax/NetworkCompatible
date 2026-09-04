@@ -42,7 +42,10 @@ public final class ProviderClient implements AutoCloseable {
     private String profileRevision;
     private JsonObject lastProfile;
     private long intervalMs = 10000, nextHeartbeat, snapshotClock;
-    private boolean started, closed;
+    private boolean started, closed, scheduledCheckIns;
+    private long nextControl, nextStatusUpdate, controlIntervalMs = 1000, minUpdateIntervalMs = 1000;
+    private ServerStatus lastReportedStatus;
+    private Health lastReportedHealth;
     private final AtomicBoolean closing = new AtomicBoolean();
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
     private ScheduledFuture<?> timer;
@@ -83,8 +86,18 @@ public final class ProviderClient implements AutoCloseable {
         started = true; heartbeat();
         timer = executor.scheduleWithFixedDelay(() -> {
             if (closed) return;
-            try { if (started && System.currentTimeMillis() >= nextHeartbeat) heartbeat(); control(); flushEvents(); }
-            catch (Exception e) { diagnostics.accept("provider_control_unavailable: " + safeFailure(e)); }
+            try {
+                if (started && (System.nanoTime() >= nextHeartbeat || statusChanged())) heartbeat();
+            } catch (Exception e) {
+                nextHeartbeat = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                nextStatusUpdate = nextHeartbeat;
+                diagnostics.accept("provider_status_unavailable: " + safeFailure(e));
+            }
+            if (System.nanoTime() >= nextControl) {
+                nextControl = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(controlIntervalMs);
+                try { control(); } catch (Exception e) { diagnostics.accept("provider_control_unavailable: " + safeFailure(e)); }
+            }
+            try { flushEvents(); } catch (Exception e) { diagnostics.accept("provider_events_unavailable: " + safeFailure(e)); }
         }, 1000, 1000, TimeUnit.MILLISECONDS);
         return registration.deepCopy();
     }); }
@@ -169,22 +182,51 @@ public final class ProviderClient implements AutoCloseable {
     }
     /** A full immutable snapshot. Callers may update every one of the seven fields. */
     public void setServerStatus(ServerStatus status) { explicitStatus.set(Objects.requireNonNull(status)); requestStatusRefresh(); }
-    /** Coalesces join/leave/reload bursts; the next permitted heartbeat obtains a fresh complete snapshot. */
+    /** Wake local observation on join/leave/reload; unchanged snapshots never create network traffic. */
     public void requestStatusRefresh() {
-        if (!closing.get() && refreshQueued.compareAndSet(false, true)) executor.execute(() -> { refreshQueued.set(false); if (!closed && started && System.currentTimeMillis() >= nextHeartbeat) { try { heartbeat(); } catch (Exception e) { diagnostics.accept("provider_status_unavailable: " + safeFailure(e)); } } });
+        if (!closing.get() && refreshQueued.compareAndSet(false, true)) executor.execute(() -> { refreshQueued.set(false); if (!closed && started) { try { if (statusChanged()) heartbeat(); } catch (Exception e) { nextStatusUpdate = System.nanoTime() + TimeUnit.SECONDS.toNanos(10); diagnostics.accept("provider_status_unavailable: " + safeFailure(e)); } } });
+    }
+    private ServerStatus currentStatus() { ServerStatus s = explicitStatus.get(); return s == null && statusSupplier != null ? statusSupplier.get() : s; }
+    private boolean statusChanged() {
+        if (System.nanoTime() < nextStatusUpdate) return false;
+        if (!scheduledCheckIns) return System.nanoTime() >= nextHeartbeat;
+        ServerStatus status = currentStatus(); Health health = healthSupplier.get();
+        return !Objects.equals(status, lastReportedStatus) || lastReportedHealth == null
+            || health.healthy() != lastReportedHealth.healthy() || health.capacity() != lastReportedHealth.capacity()
+            || !Objects.equals(health.protocolVersion(), lastReportedHealth.protocolVersion()) || !Objects.equals(health.build(), lastReportedHealth.build());
     }
     private void heartbeat() throws Exception {
         JsonObject profile = transport.hostProfile().toCompletableFuture().get(10, TimeUnit.SECONDS);
         if (profile == null) throw new IOException("Transport profile unavailable");
-        if (!profile.equals(lastProfile) || !state.has("profilePublishedAt") || System.currentTimeMillis() - state.get("profilePublishedAt").getAsLong() > 300000) {
+        boolean supportsSchedule = discovery.getAsJsonObject("limits").has("checkInVersion")
+            && discovery.getAsJsonObject("limits").get("checkInVersion").getAsInt() == 1 && profile.has("statelessAdmission");
+        if (!profile.equals(lastProfile) || !state.has("profilePublishedAt") || (!supportsSchedule && System.currentTimeMillis() - state.get("profilePublishedAt").getAsLong() > 300000)) {
             JsonObject published = signed("host-profile", "POST", profile); profileRevision = published.get("revision").getAsString(); lastProfile = profile.deepCopy(); state.addProperty("profilePublishedAt", System.currentTimeMillis()); save();
         }
         Health h = healthSupplier.get(); JsonObject body = new JsonObject(); body.addProperty("healthy", h.healthy()); body.addProperty("capacity", h.capacity()); body.addProperty("load", h.load()); body.addProperty("protocolVersion", h.protocolVersion()); body.addProperty("build", h.build()); body.addProperty("hostProfileRevision", profileRevision);
         if (config.region() != null) body.addProperty("region", config.region());
         snapshotClock = Math.max(System.currentTimeMillis(), snapshotClock + 1); body.addProperty("clockUnixMillis", snapshotClock);
-        try { ServerStatus s = explicitStatus.get(); if (s == null && statusSupplier != null) s = statusSupplier.get(); if (s != null) body.add("serverStatus", JSON.toJsonTree(s)); }
+        ServerStatus status = null;
+        try { status = currentStatus(); if (status != null) body.add("serverStatus", JSON.toJsonTree(status)); }
         catch (RuntimeException e) { diagnostics.accept("status_refresh_failed"); /* Omit snapshot; old report timestamp must expire. */ }
-        signed("heartbeat", "POST", body); nextHeartbeat = System.currentTimeMillis() + intervalMs + ThreadLocalRandom.current().nextLong(Math.max(1, intervalMs / 10));
+        if (supportsSchedule) body.addProperty("checkInVersion", 1);
+        long requestStarted = System.nanoTime();
+        JsonObject response = signed("heartbeat", "POST", body);
+        if (supportsSchedule && response.has("checkIn")) {
+            CheckInSchedule schedule = CheckInSchedule.parse(response);
+            scheduledCheckIns = true; controlIntervalMs = schedule.controlPollAfterMillis(); minUpdateIntervalMs = schedule.minUpdateIntervalMillis();
+            // Count network time against the granted interval; retries cannot postpone an absolute lease.
+            long received = java.time.Instant.parse(response.get("receivedAt").getAsString()).toEpochMilli();
+            long remaining = Math.min(schedule.afterMillis(), Math.max(0, response.getAsJsonObject("checkIn").get("nextCheckInAt").getAsLong() - Math.max(received, System.currentTimeMillis())));
+            nextHeartbeat = Math.min(requestStarted + TimeUnit.MILLISECONDS.toNanos(schedule.afterMillis()), System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(remaining));
+            nextControl = Math.min(nextControl, requestStarted + TimeUnit.MILLISECONDS.toNanos(controlIntervalMs));
+        } else {
+            scheduledCheckIns = false; controlIntervalMs = 1000;
+            nextHeartbeat = requestStarted + TimeUnit.MILLISECONDS.toNanos(intervalMs + ThreadLocalRandom.current().nextLong(Math.max(1, intervalMs / 10)));
+            nextControl = Math.min(nextControl, System.nanoTime() + TimeUnit.SECONDS.toNanos(1));
+        }
+        nextStatusUpdate = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(scheduledCheckIns ? minUpdateIntervalMs : intervalMs);
+        lastReportedStatus = status; lastReportedHealth = h;
     }
     private void control() throws Exception {
         JsonObject page = signed("control", "GET", null);
