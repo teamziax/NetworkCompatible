@@ -65,7 +65,9 @@ public final class ProviderClient implements AutoCloseable {
         if (!registration.get("provider").getAsString().equals(origin)) throw new IOException("Registration audience changed");
         if (discovery.getAsJsonObject("operations").has("claim-action") && (!registration.has("pendingAction") || registration.getAsJsonObject("pendingAction").get("expiresAt").getAsLong() <= System.currentTimeMillis())) {
             JsonObject readiness = signed("readiness", "GET", null);
-            if (readiness.getAsJsonObject("readiness").getAsJsonArray("reasons").contains(new JsonPrimitive("claim_required"))) {
+            boolean claimAvailable = readiness.has("claimAvailable") ? readiness.get("claimAvailable").getAsBoolean()
+                : readiness.getAsJsonObject("readiness").getAsJsonArray("reasons").contains(new JsonPrimitive("claim_required"));
+            if (claimAvailable) {
                 JsonObject action = signed("claim-action", "POST", new JsonObject());
                 if (action.has("pendingAction")) { registration.add("pendingAction", action.get("pendingAction")); save(); }
             }

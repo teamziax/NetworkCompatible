@@ -11,6 +11,33 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProviderClientTest {
+    @Test void refreshesAnExpiredOptionalClaimWithoutBlockingReadiness(@TempDir Path path) throws Exception {
+        try (IndependentProviderStub stub = new IndependentProviderStub()) {
+            stub.optionalClaim = true;
+            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example", null, null, null);
+            java.util.function.Supplier<ProviderClient> create = () -> {
+                try { return new ProviderClient(config, new ProviderStateStore(path), new FakeTransport(), () -> null,
+                    () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {}); }
+                catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+            };
+            ProviderClient first = create.get();
+            try {
+                assertTrue(first.start().get(20, TimeUnit.SECONDS).has("pendingAction"));
+                assertTrue(first.readiness().get(10, TimeUnit.SECONDS).get("routable").getAsBoolean());
+            } finally { first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+            try (ProviderStateStore store = new ProviderStateStore(path)) {
+                JsonObject state = store.read(); state.getAsJsonObject("registration").getAsJsonObject("pendingAction").addProperty("expiresAt", 0); store.write(state);
+            }
+            ProviderClient resumed = create.get();
+            try {
+                JsonObject registration = resumed.start().get(20, TimeUnit.SECONDS);
+                assertEquals("example-machine-1", registration.get("instanceId").getAsString());
+                assertTrue(registration.getAsJsonObject("pendingAction").get("url").getAsString().endsWith("/2"));
+                assertEquals(1, stub.registrations); assertEquals(2, stub.claimActions);
+                assertTrue(resumed.readiness().get(10, TimeUnit.SECONDS).get("routable").getAsBoolean());
+            } finally { resumed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+        }
+    }
     static final class FakeTransport implements ProviderTransport {
         final CompletableFuture<Void> closed = new CompletableFuture<>();
         volatile int installed, applied, admissions, drains;

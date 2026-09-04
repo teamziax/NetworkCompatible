@@ -18,6 +18,8 @@ public final class IndependentProviderStub implements AutoCloseable {
     final java.util.List<JsonObject> events = new java.util.concurrent.CopyOnWriteArrayList<>();
     long generation, sequence;
     volatile int registrations, heartbeats, acknowledgements;
+    volatile boolean optionalClaim;
+    volatile int claimActions;
     boolean draining;
     volatile JsonArray commands = new JsonArray();
     public IndependentProviderStub() throws IOException {
@@ -38,6 +40,7 @@ public final class IndependentProviderStub implements AutoCloseable {
             JsonObject d = new JsonObject(); d.addProperty("provider", origin); d.addProperty("controlOrigin", origin);
             d.add("protocols", strings(ProviderCrypto.PROTOCOL)); d.add("signatures", strings(ProviderCrypto.SIGNATURE)); d.add("modes", strings("new-service", "attach-instance")); d.add("profiles", strings("example-profile-v0"));
             JsonObject operations = new JsonObject(); for (String op : List.of("challenges", "complete", "recover", "activate", "heartbeat", "host-profile", "readiness", "control", "control/ack", "drain", "rotate", "retire", "ticket-keys", "ticket-keys/ack", "ticket-events", "events")) operations.addProperty(op, origin + "/example/" + op);
+            if (optionalClaim) operations.addProperty("claim-action", origin + "/example/claim-action");
             d.add("operations", operations); JsonObject limits = new JsonObject(); limits.addProperty("heartbeatIntervalMs", 1000); limits.addProperty("maxControlPage", 100); limits.addProperty("leaseMs", 30000); limits.addProperty("maxBodyBytes", 65536); limits.addProperty("clockSkewMs", 60000); d.add("limits", limits);
             JsonObject policy = new JsonObject(); policy.addProperty("newServiceClaim", "none"); policy.addProperty("anonymousPow", true); policy.addProperty("attachmentPow", false); d.add("policy", policy); return d;
         }
@@ -69,7 +72,12 @@ public final class IndependentProviderStub implements AutoCloseable {
             case "/example/heartbeat" -> { if (draining) throw new Failure(403, "draining"); lastHeartbeat = body; heartbeats++; }
             case "/example/control" -> { ok.add("commands", commands.deepCopy()); ok.addProperty("cursor", "example-cursor"); ok.addProperty("serverTime", java.time.Instant.now().toString()); }
             case "/example/control/ack" -> { acknowledgements++; commands = new JsonArray(); }
-            case "/example/readiness" -> { ok.addProperty("routable", heartbeats > 0 && !draining); }
+            case "/example/readiness" -> { ok.addProperty("routable", heartbeats > 0 && !draining); if (optionalClaim) ok.addProperty("claimAvailable", true); }
+            case "/example/claim-action" -> {
+                if (!optionalClaim) throw new Failure(422, "unknown_operation");
+                claimActions++; JsonObject action = new JsonObject(); action.addProperty("url", origin + "/optional-claim/" + claimActions);
+                action.addProperty("expiresAt", System.currentTimeMillis() + 60000); action.addProperty("text", "Optional ownership claim"); ok.add("pendingAction", action);
+            }
             case "/example/drain" -> draining = true;
             case "/example/ticket-keys" -> ok.add("ticketKey", ticket());
             case "/example/ticket-keys/ack" -> { }
