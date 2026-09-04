@@ -29,3 +29,4 @@ plugins {
 
 include("transport-raknet")
 include("transport-nethernet")
+include("warden-signalling")

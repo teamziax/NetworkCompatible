@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent.warden.cloud/schemas/provider-registration-v0.json",
+  "title": "nethernet-provider-registration-v0",
+  "type": "object",
+  "required": [
+    "protocol",
+    "mode",
+    "profile",
+    "publicKeyJwk"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "nethernet-provider-registration-v0"
+    },
+    "mode": {
+      "enum": [
+        "new-service",
+        "attach-instance"
+      ]
+    },
+    "profile": {
+      "type": "string"
+    },
+    "publicKeyJwk": {
+      "type": "object",
+      "required": [
+        "crv",
+        "kty",
+        "x",
+        "y"
+      ],
+      "not": {
+        "required": [
+          "d"
+        ]
+      },
+      "properties": {
+        "crv": {
+          "const": "P-384"
+        },
+        "kty": {
+          "const": "EC"
+        },
+        "x": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{64}$"
+        },
+        "y": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{64}$"
+        }
+      }
+    },
+    "label": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "bootstrapGrant": {
+      "type": "string"
+    },
+    "placement": {
+      "type": "object",
+      "required": [
+        "region",
+        "pool"
+      ],
+      "properties": {
+        "region": {
+          "type": "string"
+        },
+        "pool": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "attach-instance"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bootstrapGrant",
+          "placement"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "discovery": {
+      "type": "object",
+      "required": [
+        "provider",
+        "controlOrigin",
+        "protocols",
+        "signatures",
+        "modes",
+        "profiles",
+        "operations",
+        "policy",
+        "limits"
+      ]
+    },
+    "challenge": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "signature",
+        "challengeId",
+        "nonce",
+        "audience",
+        "thumbprint",
+        "context",
+        "contextDigest",
+        "expiresAt",
+        "serverTime",
+        "pow"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "nethernet-provider-registration-v0"
+        },
+        "signature": {
+          "const": "provider-es384-v0"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "serverTime": {
+          "type": "integer"
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "challengeId",
+        "proofNonce",
+        "signature",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "nethernet-provider-registration-v0"
+        }
+      }
+    },
+    "registration": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "provider",
+        "registrationId",
+        "serviceId",
+        "instanceId",
+        "keyId",
+        "profile",
+        "publicAddress",
+        "placement",
+        "heartbeatIntervalMs",
+        "leaseGeneration",
+        "leaseDeadline",
+        "readiness"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "nethernet-provider-registration-v0"
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "required": [
+        "serverTime",
+        "serviceId",
+        "instanceId",
+        "serviceAvailable",
+        "instanceRoutable",
+        "readiness",
+        "leaseGeneration",
+        "leaseDeadline",
+        "placement"
+      ]
+    },
+    "activation": {
+      "type": "object",
+      "required": [
+        "accepted",
+        "serverTime",
+        "leaseGeneration",
+        "leaseDeadline",
+        "readiness"
+      ]
+    },
+    "rotation": {
+      "type": "object",
+      "required": [
+        "publicKeyJwk",
+        "proof"
+      ]
+    },
+    "ticketKey": {
+      "type": "object",
+      "required": [
+        "keyId",
+        "secret"
+      ]
+    },
+    "pendingAction": {
+      "type": "object",
+      "required": [
+        "url",
+        "expiresAt",
+        "text"
+      ]
+    }
+  },
+  "x-context-order": [
+    "mode",
+    "profile",
+    "label",
+    "grantId",
+    "serviceId",
+    "region",
+    "pool",
+    "registrationId"
+  ],
+  "x-signature-format": "ES384 P1363 r||s 96 bytes unpadded base64url",
+  "x-canonicalization": "UTF-8 JSON arrays, no whitespace, no Unicode normalization, epoch milliseconds as integers, absent context strings are empty"
+}

@@ -1,0 +1,513 @@
+{
+  "consumerRules": [
+    "Validate and apply every known command in order.",
+    "For join-admission, verify top-level IDs match ticketClaims before creating host transport state.",
+    "For join-admission, require ticketClaims.clientIceUfrag to match clientIce.ufrag when present.",
+    "For join-admission, recompute ticketClaims.offerFingerprintHash from the DTLS fingerprints in clientOffer.sdp before creating host transport state.",
+    "For join-admission, recompute ticketClaims.playerIdentityHash from the redacted player summary when present; hold acknowledgement on mismatch.",
+    "For join-admission, compare ticketClaims.expiresAt epoch milliseconds against AgentControlResponse.serverTime; Warden filters expired join-admissions before polling, but consumers must still reject expired commands defensively.",
+    "For join-admission, treat clientOffer.sdp as sensitive volatile transport metadata; it is stripped of a=identity assertions but still contains client ICE credentials and DTLS fingerprints.",
+    "For join-admission, treat player as an optional redacted verified-identity summary; use it for enrichment and diagnostics only, never as a replacement for ticket or SDP validation.",
+    "Use clientOffer.sdp as the remote offer when creating the lazy host PeerConnection; do not write it to normal logs or durable support artifacts.",
+    "Persist accepted join admissions by answerIce.ufrag plus clientIce.ufrag; the first STUN packet exposes ICE username fragments, not a Warden decision ID.",
+    "Report join-admission.ticketId on ticket lifecycle events; it is a redacted Warden ticket identifier, not the transport admission key.",
+    "Treat expired join-admission as handled only after recording a terminal ticket.failed outcome.",
+    "Acknowledge page.cursor only after every command in the page is durably handled or intentionally discarded.",
+    "If any command cannot be safely handled, do not acknowledge the cursor; replay is preferred to silent command loss."
+  ],
+  "fixtures": [
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "kind": "drain",
+            "reason": "maintenance window"
+          },
+          {
+            "answerIce": {
+              "pwd": "answer-password-valid",
+              "ufrag": "answer-ufrag-valid"
+            },
+            "clientOffer": {
+              "sdp": "v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:client-ufrag-valid\r\na=ice-pwd:client-password-valid\r\na=fingerprint:sha-256 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n"
+            },
+            "clientIce": {
+              "ufrag": "client-ufrag-valid"
+            },
+            "decisionId": "dec_fixture_valid",
+            "gameServerId": "gs_fixture_lon",
+            "kind": "join-admission",
+            "networkId": "9876543210123456789",
+            "player": {
+              "identitySource": "minecraft",
+              "playerKey": "xuid:2535413123456789",
+              "xuid": "2535413123456789"
+            },
+            "signalServerId": "sig_fixture",
+            "ticketId": "d396ad7d46c9a270ecf356ea7e851516",
+            "ticketClaims": {
+              "clientIceUfrag": "client-ufrag-valid",
+              "expiresAt": 1781697630000,
+              "gameServerId": "gs_fixture_lon",
+              "networkId": "9876543210123456789",
+              "offerFingerprintHash": "TY74F6NZ7SCZAHFAG4XFZ7CS6I",
+              "playerIdentityHash": "6N3XMXAIZFDOQOV22QTS7YFGGU",
+              "signalServerId": "sig_fixture"
+            }
+          }
+        ],
+        "cursor": "cursor_fixture_mixed_valid",
+        "gameServerReadiness": {
+          "reasons": [],
+          "routable": true
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "active"
+      },
+      "description": "Mixed known commands with a valid join-admission can be acknowledged only after the drain command and admission are both durably handled.",
+      "expected": {
+        "ack": {
+          "allowed": true,
+          "cursor": "cursor_fixture_mixed_valid",
+          "onlyAfter": "drain command applied and join-admission persisted by answerIce.ufrag+clientIce.ufrag"
+        },
+        "expiredJoinAdmissionDecisionIds": [],
+        "handledCommandKinds": [
+          "drain",
+          "join-admission"
+        ],
+        "invalidJoinAdmissionDecisionIds": [],
+        "requiredTerminalTicketEvents": [],
+        "unknownCommandKinds": [],
+        "validJoinAdmissions": [
+          {
+            "admissionKey": "answer-ufrag-valid:client-ufrag-valid",
+            "decisionId": "dec_fixture_valid",
+            "expiresAt": 1781697630000,
+            "persistBy": "answerIce.ufrag+clientIce.ufrag",
+            "player": {
+              "identitySource": "minecraft",
+              "playerKey": "xuid:2535413123456789",
+              "xuid": "2535413123456789"
+            },
+            "ticketId": "d396ad7d46c9a270ecf356ea7e851516"
+          }
+        ]
+      },
+      "name": "mixed-valid-join-admission"
+    },
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "kind": "reconfigure",
+            "reason": "routing policy changed",
+            "resource": "routing-policy",
+            "resourceId": "rp_fixture",
+            "signalServerId": "sig_fixture"
+          },
+          {
+            "kind": "suspend",
+            "reason": "game server suspended"
+          },
+          {
+            "kind": "revoke",
+            "reason": "signal server suspended"
+          },
+          {
+            "credentialKeyId": "cred_reg_fixture",
+            "kind": "rotate-credential",
+            "reason": "registration completed"
+          }
+        ],
+        "cursor": "cursor_fixture_lifecycle",
+        "gameServerReadiness": {
+          "reasons": [
+            "game_server_not_active"
+          ],
+          "routable": false
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "suspended"
+      },
+      "description": "Lifecycle-only pages are safe to acknowledge after every reconfigure, suspend, revoke, and rotate-credential command has been applied locally.",
+      "expected": {
+        "ack": {
+          "allowed": true,
+          "cursor": "cursor_fixture_lifecycle",
+          "onlyAfter": "reconfigure command applied and suspend command applied and revoke command applied and rotate-credential command applied"
+        },
+        "expiredJoinAdmissionDecisionIds": [],
+        "handledCommandKinds": [
+          "reconfigure",
+          "suspend",
+          "revoke",
+          "rotate-credential"
+        ],
+        "invalidJoinAdmissionDecisionIds": [],
+        "requiredTerminalTicketEvents": [],
+        "unknownCommandKinds": [],
+        "validJoinAdmissions": []
+      },
+      "name": "lifecycle-commands"
+    },
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "kind": "reconfigure",
+            "reason": "routing policy changed",
+            "resourceId": "rp_fixture",
+            "signalServerId": "sig_fixture"
+          }
+        ],
+        "cursor": "cursor_fixture_malformed_lifecycle",
+        "gameServerReadiness": {
+          "reasons": [],
+          "routable": true
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "active"
+      },
+      "description": "Malformed lifecycle commands must hold cursor acknowledgement even when the kind is known.",
+      "expected": {
+        "ack": {
+          "allowed": false,
+          "reason": "reconfigure command is malformed"
+        },
+        "expiredJoinAdmissionDecisionIds": [],
+        "handledCommandKinds": [],
+        "invalidJoinAdmissionDecisionIds": [],
+        "requiredTerminalTicketEvents": [],
+        "unknownCommandKinds": [],
+        "validJoinAdmissions": []
+      },
+      "name": "malformed-lifecycle-command-holds-cursor"
+    },
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "answerIce": {
+              "pwd": "answer-password-expired",
+              "ufrag": "answer-ufrag-expired"
+            },
+            "clientOffer": {
+              "sdp": "v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:client-ufrag-expired\r\na=ice-pwd:client-password-expired\r\na=fingerprint:sha-256 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n"
+            },
+            "clientIce": {
+              "ufrag": "client-ufrag-expired"
+            },
+            "decisionId": "dec_fixture_expired",
+            "gameServerId": "gs_fixture_lon",
+            "kind": "join-admission",
+            "networkId": "9876543210123456789",
+            "signalServerId": "sig_fixture",
+            "ticketId": "7668da357dcabb8af74cfe6d624f37bf",
+            "ticketClaims": {
+              "expiresAt": 1781697570000,
+              "gameServerId": "gs_fixture_lon",
+              "networkId": "9876543210123456789",
+              "offerFingerprintHash": "TY74F6NZ7SCZAHFAG4XFZ7CS6I",
+              "signalServerId": "sig_fixture"
+            }
+          }
+        ],
+        "cursor": "cursor_fixture_expired",
+        "gameServerReadiness": {
+          "reasons": [],
+          "routable": true
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "active"
+      },
+      "description": "Defensive expired join-admission fixture for clock-skew or replay handling; it must not create host transport state and is handled only after a terminal ticket.failed event is recorded.",
+      "expected": {
+        "ack": {
+          "allowed": true,
+          "cursor": "cursor_fixture_expired",
+          "onlyAfter": "ticket.failed recorded for dec_fixture_expired"
+        },
+        "expiredJoinAdmissionDecisionIds": [
+          "dec_fixture_expired"
+        ],
+        "handledCommandKinds": [
+          "join-admission"
+        ],
+        "invalidJoinAdmissionDecisionIds": [],
+        "requiredTerminalTicketEvents": [
+          {
+            "decisionId": "dec_fixture_expired",
+            "reason": "expired_join_admission",
+            "stage": "ticket.failed",
+            "ticketId": "7668da357dcabb8af74cfe6d624f37bf"
+          }
+        ],
+        "unknownCommandKinds": [],
+        "validJoinAdmissions": []
+      },
+      "name": "expired-join-admission"
+    },
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "kind": "future-command",
+            "resourceId": "future-resource"
+          },
+          {
+            "kind": "noop"
+          }
+        ],
+        "cursor": "cursor_fixture_unknown",
+        "gameServerReadiness": {
+          "reasons": [],
+          "routable": true
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "active"
+      },
+      "description": "Unknown commands are safe to replay and must hold cursor acknowledgement even if later commands on the page are understood.",
+      "expected": {
+        "ack": {
+          "allowed": false,
+          "reason": "unknown command kind future-command cannot be safely handled"
+        },
+        "expiredJoinAdmissionDecisionIds": [],
+        "handledCommandKinds": [
+          "noop"
+        ],
+        "invalidJoinAdmissionDecisionIds": [],
+        "requiredTerminalTicketEvents": [],
+        "unknownCommandKinds": [
+          "future-command"
+        ],
+        "validJoinAdmissions": []
+      },
+      "name": "unknown-command-holds-cursor"
+    },
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "answerIce": {
+              "pwd": "answer-password-offer-fingerprint-mismatch",
+              "ufrag": "answer-ufrag-offer-fingerprint-mismatch"
+            },
+            "clientOffer": {
+              "sdp": "v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:client-ufrag-offer-fingerprint-mismatch\r\na=ice-pwd:client-password-offer-fingerprint-mismatch\r\na=fingerprint:sha-256 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n"
+            },
+            "clientIce": {
+              "ufrag": "client-ufrag-offer-fingerprint-mismatch"
+            },
+            "decisionId": "dec_fixture_offer_fingerprint_mismatch",
+            "gameServerId": "gs_fixture_lon",
+            "kind": "join-admission",
+            "networkId": "9876543210123456789",
+            "signalServerId": "sig_fixture",
+            "ticketId": "45ce4064310b8f0e0b13474309e9f90a",
+            "ticketClaims": {
+              "expiresAt": 1781697630000,
+              "gameServerId": "gs_fixture_lon",
+              "networkId": "9876543210123456789",
+              "offerFingerprintHash": "MISMATCHEDOFFERHASHVALUE",
+              "signalServerId": "sig_fixture"
+            }
+          }
+        ],
+        "cursor": "cursor_fixture_offer_fingerprint_mismatch",
+        "gameServerReadiness": {
+          "reasons": [],
+          "routable": true
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "active"
+      },
+      "description": "A join-admission whose ticketClaims.offerFingerprintHash does not match clientOffer.sdp DTLS fingerprints must not create host transport state and must hold acknowledgement.",
+      "expected": {
+        "ack": {
+          "allowed": false,
+          "reason": "join-admission dec_fixture_offer_fingerprint_mismatch has mismatched ticketClaims"
+        },
+        "expiredJoinAdmissionDecisionIds": [],
+        "handledCommandKinds": [],
+        "invalidJoinAdmissionDecisionIds": [
+          "dec_fixture_offer_fingerprint_mismatch"
+        ],
+        "requiredTerminalTicketEvents": [],
+        "unknownCommandKinds": [],
+        "validJoinAdmissions": []
+      },
+      "name": "offer-fingerprint-mismatch-holds-cursor"
+    },
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "answerIce": {
+              "pwd": "answer-password-identity-offer",
+              "ufrag": "answer-ufrag-identity-offer"
+            },
+            "clientOffer": {
+              "sdp": "v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:client-ufrag-identity-offer\r\na=ice-pwd:client-password-identity-offer\r\na=fingerprint:sha-256 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\na=identity:unsafe-fixture\r\n"
+            },
+            "clientIce": {
+              "ufrag": "client-ufrag-identity-offer"
+            },
+            "decisionId": "dec_fixture_identity_offer",
+            "gameServerId": "gs_fixture_lon",
+            "kind": "join-admission",
+            "networkId": "9876543210123456789",
+            "signalServerId": "sig_fixture",
+            "ticketId": "b2457d1be3b5483eb1a6b3ec676a2537",
+            "ticketClaims": {
+              "expiresAt": 1781697630000,
+              "gameServerId": "gs_fixture_lon",
+              "networkId": "9876543210123456789",
+              "offerFingerprintHash": "TY74F6NZ7SCZAHFAG4XFZ7CS6I",
+              "signalServerId": "sig_fixture"
+            }
+          },
+          {
+            "answerIce": {
+              "pwd": "answer-password-ufrag-mismatch",
+              "ufrag": "answer-ufrag-ufrag-mismatch"
+            },
+            "clientOffer": {
+              "sdp": "v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:other-client-ufrag\r\na=ice-pwd:client-password-ufrag-mismatch\r\na=fingerprint:sha-256 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n"
+            },
+            "clientIce": {
+              "ufrag": "client-ufrag-ufrag-mismatch"
+            },
+            "decisionId": "dec_fixture_ufrag_mismatch",
+            "gameServerId": "gs_fixture_lon",
+            "kind": "join-admission",
+            "networkId": "9876543210123456789",
+            "signalServerId": "sig_fixture",
+            "ticketId": "2052e07b6c904857a46752ff89144d2a",
+            "ticketClaims": {
+              "expiresAt": 1781697630000,
+              "gameServerId": "gs_fixture_lon",
+              "networkId": "9876543210123456789",
+              "offerFingerprintHash": "TY74F6NZ7SCZAHFAG4XFZ7CS6I",
+              "signalServerId": "sig_fixture"
+            }
+          },
+          {
+            "answerIce": {
+              "pwd": "answer-password-missing-fingerprint",
+              "ufrag": "answer-ufrag-missing-fingerprint"
+            },
+            "clientOffer": {
+              "sdp": "v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:client-ufrag-missing-fingerprint\r\na=ice-pwd:client-password-missing-fingerprint\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n"
+            },
+            "clientIce": {
+              "ufrag": "client-ufrag-missing-fingerprint"
+            },
+            "decisionId": "dec_fixture_missing_fingerprint",
+            "gameServerId": "gs_fixture_lon",
+            "kind": "join-admission",
+            "networkId": "9876543210123456789",
+            "signalServerId": "sig_fixture",
+            "ticketId": "68584695a5b3453c9266e7d17e38ef95",
+            "ticketClaims": {
+              "expiresAt": 1781697630000,
+              "gameServerId": "gs_fixture_lon",
+              "networkId": "9876543210123456789",
+              "offerFingerprintHash": "MISSINGFINGERPRINTCLAIM",
+              "signalServerId": "sig_fixture"
+            }
+          }
+        ],
+        "cursor": "cursor_fixture_unsafe_client_offer",
+        "gameServerReadiness": {
+          "reasons": [],
+          "routable": true
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "active"
+      },
+      "description": "Unsafe client offers must not create host transport state and must hold acknowledgement when SDP still contains identity assertions, mismatched ICE ufrags, or no DTLS fingerprint.",
+      "expected": {
+        "ack": {
+          "allowed": false,
+          "reason": "join-admission dec_fixture_identity_offer has unsafe clientOffer"
+        },
+        "expiredJoinAdmissionDecisionIds": [],
+        "handledCommandKinds": [],
+        "invalidJoinAdmissionDecisionIds": [
+          "dec_fixture_identity_offer",
+          "dec_fixture_ufrag_mismatch",
+          "dec_fixture_missing_fingerprint"
+        ],
+        "requiredTerminalTicketEvents": [],
+        "unknownCommandKinds": [],
+        "validJoinAdmissions": []
+      },
+      "name": "unsafe-client-offers-hold-cursor"
+    },
+    {
+      "controlResponse": {
+        "commands": [
+          {
+            "answerIce": {
+              "pwd": "answer-password-invalid",
+              "ufrag": "answer-ufrag-invalid"
+            },
+            "clientOffer": {
+              "sdp": "v=0\r\no=- 1234567890 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:client-ufrag-invalid\r\na=ice-pwd:client-password-invalid\r\na=fingerprint:sha-256 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n"
+            },
+            "clientIce": {
+              "ufrag": "client-ufrag-invalid"
+            },
+            "decisionId": "dec_fixture_invalid",
+            "gameServerId": "gs_fixture_lon",
+            "kind": "join-admission",
+            "networkId": "9876543210123456789",
+            "signalServerId": "sig_fixture",
+            "ticketId": "a6bd79d7939fb2e89e14f8d77672498f",
+            "ticketClaims": {
+              "expiresAt": 1781697630000,
+              "gameServerId": "gs_fixture_other",
+              "networkId": "9876543210123456789",
+              "offerFingerprintHash": "TY74F6NZ7SCZAHFAG4XFZ7CS6I",
+              "signalServerId": "sig_fixture"
+            }
+          }
+        ],
+        "cursor": "cursor_fixture_invalid",
+        "gameServerReadiness": {
+          "reasons": [],
+          "routable": true
+        },
+        "heartbeatIntervalSeconds": 10,
+        "serverTime": "2026-06-17T12:00:00.000Z",
+        "signalServerStatus": "active"
+      },
+      "description": "Mismatched join-admission claims must not create host transport state and should hold acknowledgement for replay/support investigation.",
+      "expected": {
+        "ack": {
+          "allowed": false,
+          "reason": "join-admission dec_fixture_invalid has mismatched ticketClaims"
+        },
+        "expiredJoinAdmissionDecisionIds": [],
+        "handledCommandKinds": [],
+        "invalidJoinAdmissionDecisionIds": [
+          "dec_fixture_invalid"
+        ],
+        "requiredTerminalTicketEvents": [],
+        "unknownCommandKinds": [],
+        "validJoinAdmissions": []
+      },
+      "name": "invalid-join-admission-holds-cursor"
+    }
+  ],
+  "version": 1
+}
