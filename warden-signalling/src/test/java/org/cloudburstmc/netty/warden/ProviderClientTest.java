@@ -79,4 +79,17 @@ class ProviderClientTest {
         }
     }
 
+    @Test void localPersistenceFailureStopsPublicationAndClosesTransport(@TempDir Path path) throws Exception {
+        try (IndependentProviderStub stub = new IndependentProviderStub()) {
+            FakeTransport host = new FakeTransport();
+            var client = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example", null, null, null), new ProviderStateStore(path), host, () -> null, () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {});
+            client.start().get(20, TimeUnit.SECONDS);
+            java.nio.file.Files.move(path.resolve("provider-state.json"), path.resolve("saved-state.json"));
+            java.nio.file.Files.createDirectory(path.resolve("provider-state.json"));
+            assertThrows(ExecutionException.class, () -> client.readiness().get(10, TimeUnit.SECONDS));
+            client.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertTrue(host.closed.isDone());
+        }
+    }
+
 }

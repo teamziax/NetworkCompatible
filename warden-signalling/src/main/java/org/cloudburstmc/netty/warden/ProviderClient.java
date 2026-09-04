@@ -318,7 +318,10 @@ public final class ProviderClient implements AutoCloseable {
     }
     private String registration(String field) { return state.getAsJsonObject("registration").get(field).getAsString(); }
     private JsonObject redactedRegistration() { JsonObject copy = state.getAsJsonObject("registration").deepCopy(); copy.remove("ticketKey"); return copy; }
-    private void save() throws IOException { store.write(state); }
+    private void save() throws IOException {
+        try { store.write(state); }
+        catch (IOException failure) { diagnostics.accept("provider_persistence_failed"); stop(); throw failure; }
+    }
     private static String safeFailure(Exception e) { return e instanceof ProviderException ? e.getMessage() : e.getClass().getSimpleName(); }
     private <T> CompletableFuture<T> submit(Callable<T> fn) {
         CompletableFuture<T> f = new CompletableFuture<>(); executor.execute(() -> { try { if (closed) throw new IOException("Provider is closed"); f.complete(fn.call()); } catch (Throwable e) { f.completeExceptionally(e); } }); return f;
