@@ -15,6 +15,8 @@ tasks.jar { manifest.attributes["Automatic-Module-Name"] = "org.cloudburstmc.net
 tasks.test { useJUnitPlatform { excludeTags("native") } }
 tasks.register("nativeBenchClasspath") {
     dependsOn(tasks.testClasses)
+    // Printing a classpath does not otherwise make Gradle build its project JARs.
+    dependsOn(sourceSets.test.get().runtimeClasspath)
     doLast { println(sourceSets.test.get().runtimeClasspath.asPath) }
 }
 tasks.register<Test>("nativeAdmissionTest") {
