@@ -111,3 +111,9 @@ The cleanup remedy passes [CI run 33829800445](https://github.com/teamziax/Netwo
 The provider boundary test also verifies zero peer creation from background
 profile/key setup, key rotation, rejection of join-admission control, and a fresh
 incarnation when the same UDP endpoint restarts.
+
+`NativeAdmissionWriteTest.nettyClosureCannotHideNativeTeardownFailure` reproduces
+a second cleanup pitfall: Netty's `closeFuture` succeeds even when `doClose`
+throws. Capacity now follows a separate native termination result. Failed teardown
+retains the native capacity count, drains admission and fails the endpoint; it
+cannot turn into apparent successful cleanup through Netty's close notification.

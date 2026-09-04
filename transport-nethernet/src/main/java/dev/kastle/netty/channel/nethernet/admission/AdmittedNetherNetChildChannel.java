@@ -11,6 +11,9 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.function.Consumer;
 
 /** Native admission child with bounded queues and both NetherNet channel semantics. */
 public final class AdmittedNetherNetChildChannel extends NetherNetChildChannel {
@@ -19,12 +22,18 @@ public final class AdmittedNetherNetChildChannel extends NetherNetChildChannel {
     private final ArrayBlockingQueue<Incoming> incoming = new ArrayBlockingQueue<>(INBOUND_FRAMES);
     private final NetherNetFrameDecoder decoder = new NetherNetFrameDecoder();
     private final AtomicBoolean failed = new AtomicBoolean();
+    private final CompletableFuture<Void> nativeTermination = new CompletableFuture<>();
+    private final Consumer<PeerConnection> nativeCloser;
     private ScheduledFuture<?> tick;
     private volatile boolean installed;
     private boolean activated, readDemand;
 
     public AdmittedNetherNetChildChannel(Channel parent, PeerConnection peer, InetSocketAddress remote, InetSocketAddress local) {
+        this(parent, peer, remote, local, AdmittedNetherNetChildChannel::closeNativePeer);
+    }
+    AdmittedNetherNetChildChannel(Channel parent, PeerConnection peer, InetSocketAddress remote, InetSocketAddress local, Consumer<PeerConnection> nativeCloser) {
         super(parent, peer, remote, local);
+        this.nativeCloser = nativeCloser;
         config().setWriteBufferWaterMark(new WriteBufferWaterMark(WRITE_LIMIT / 4, WRITE_LIMIT / 2));
     }
     @Override protected void doRegister() {
@@ -134,13 +143,21 @@ public final class AdmittedNetherNetChildChannel extends NetherNetChildChannel {
         if (tick != null) { tick.cancel(false); tick = null; }
         // Native close waits for callbacks. Never hold the monitor used by acceptDataChannel here.
         try {
-            if (peer != null && !peer.closeAndAwait(java.time.Duration.ofSeconds(5))) {
-                peer.close();
-                throw new IllegalStateException("Native transport teardown did not complete within its deadline");
-            }
+            nativeCloser.accept(peer);
+        } catch (RuntimeException | Error failure) {
+            nativeTermination.completeExceptionally(failure); throw failure;
+        } finally {
+            incoming.clear(); decoder.clear();
         }
-        finally { incoming.clear(); decoder.clear(); }
+        nativeTermination.complete(null);
     }
+    private static void closeNativePeer(PeerConnection peer) {
+        if (peer != null && !peer.closeAndAwait(java.time.Duration.ofSeconds(5))) {
+            peer.close();
+            throw new IllegalStateException("Native transport teardown did not complete within its deadline");
+        }
+    }
+    public CompletionStage<Void> nativeTermination() { return nativeTermination; }
     void closeUnregistered() { doClose(); }
     public int queuedFrames() { return incoming.size(); }
     public int retainedAssemblyBytes() { return decoder.retainedBytes(); }

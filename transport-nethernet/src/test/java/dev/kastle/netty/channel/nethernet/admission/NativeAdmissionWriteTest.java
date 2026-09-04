@@ -9,6 +9,21 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NativeAdmissionWriteTest {
+    @Test void nettyClosureCannotHideNativeTeardownFailure() throws Exception {
+        var group = new DefaultEventLoopGroup(1);
+        var failure = new IllegalStateException("deterministically stalled native teardown");
+        var channel = new AdmittedNetherNetChildChannel(null,null,new InetSocketAddress(1),new InetSocketAddress(2), peer -> { throw failure; });
+        try {
+            group.register(channel).sync();
+            ChannelFuture close = channel.close().await();
+            assertSame(failure,close.cause());
+            assertTrue(channel.closeFuture().await().isSuccess(),"Netty closure alone conceals teardown failure");
+            var terminal = channel.nativeTermination().toCompletableFuture();
+            assertTrue(terminal.isCompletedExceptionally());
+            assertSame(failure,assertThrows(java.util.concurrent.CompletionException.class,terminal::join).getCause());
+            assertEquals(0,channel.queuedFrames());assertEquals(0,channel.retainedAssemblyBytes());
+        } finally { group.shutdownGracefully(0,1,TimeUnit.SECONDS).sync(); }
+    }
     @Test void preHandshakeWritesAreBoundedPromisesFailAndBuffersReleaseOnClose() throws Exception {
         var group = new DefaultEventLoopGroup(1);
         var channel = new AdmittedNetherNetChildChannel(null,null,new InetSocketAddress(1),new InetSocketAddress(2));

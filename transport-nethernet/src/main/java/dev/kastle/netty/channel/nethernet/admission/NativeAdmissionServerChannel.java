@@ -65,7 +65,7 @@ public final class NativeAdmissionServerChannel extends AbstractServerChannel {
             if (mux.failure() != null || nativeCloseFailure.get() != null) { close(); return; }
             for (AdmissionGate.Reservation r : gate.sweep(System.currentTimeMillis(), System.nanoTime())) finish(r, "timeout");
             // Limit creation work per tick, independent of packet rate and native callback rate.
-            for (int i = 0; i < 4 && liveNativePeers.get() < maxNativePeers; i++) { var r = pending.poll(); if (r == null) break; create(r); }
+            for (int i = 0; i < 4 && nativeCloseFailure.get() == null && liveNativePeers.get() < maxNativePeers; i++) { var r = pending.poll(); if (r == null) break; create(r); }
             for (Session session : new ArrayList<>(sessions.values())) {
                 if (session.failed || !session.child.isOpen()) { finish(session.reservation, "closed"); continue; }
                 if (!session.reported && session.child.isActive()) {
@@ -91,10 +91,12 @@ public final class NativeAdmissionServerChannel extends AbstractServerChannel {
             Session session = new Session(reservation, child);
             allocated = session; liveNativePeers.incrementAndGet(); nativeClosures.add(session.closed);
             session.closed.whenComplete((ignored, failure) -> {
-                if (failure != null) nativeCloseFailure.compareAndSet(null, failure);
-                nativeClosures.remove(session.closed); liveNativePeers.decrementAndGet();
+                if (failure != null) { nativeCloseFailure.compareAndSet(null, failure); gate.drain(); }
+                else liveNativePeers.decrementAndGet();
+                nativeClosures.remove(session.closed);
             });
-            child.closeFuture().addListener(future -> { if (future.isSuccess()) session.closed.complete(null); else session.closed.completeExceptionally(future.cause()); });
+            // Netty closeFuture signals channel closure even when doClose failed.
+            child.nativeTermination().whenComplete((ignored, failure) -> { if (failure == null) session.closed.complete(null); else session.closed.completeExceptionally(failure); });
             peer.onStateChange.register((p, state) -> { if (state == PeerState.RTC_FAILED || state == PeerState.RTC_CLOSED) session.failed = true; });
             peer.onDataChannel.register((p, dc) -> {
                 if (session.failed) return;
@@ -114,7 +116,10 @@ public final class NativeAdmissionServerChannel extends AbstractServerChannel {
         } catch (Exception failure) {
             gate.finish(reservation); sessions.remove(reservation);
             if (allocated != null) closeChild(allocated);
-            else if (peer != null) peer.close();
+            else if (peer != null) {
+                try { if (!peer.closeAndAwait(java.time.Duration.ofSeconds(5))) throw new IllegalStateException("Unregistered native cleanup timeout"); }
+                catch (Exception failedClose) { nativeCloseFailure.compareAndSet(null, failedClose); gate.drain(); peer.close(); }
+            }
             emit(reservation, "ticket.failed", "native_creation_failed", System.nanoTime());
         }
     }
