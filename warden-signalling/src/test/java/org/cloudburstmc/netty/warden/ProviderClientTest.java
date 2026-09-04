@@ -38,11 +38,51 @@ class ProviderClientTest {
             } finally { resumed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
         }
     }
+    @Test void followsProviderScheduleWithoutIdlePollingAndWakesForPlayers(@TempDir Path path) throws Exception {
+        try (IndependentProviderStub stub = new IndependentProviderStub()) {
+            stub.checkInMillis = 900000;
+            AtomicInteger players = new AtomicInteger(0); FakeTransport transport = new FakeTransport(); transport.stateless = true;
+            ProviderClient client = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Scheduled", null, null, null),
+                new ProviderStateStore(path), transport, () -> new ServerStatus("Scheduled", 1234, "fixture", "world", players.get(), 40, 0),
+                () -> new ProviderClient.Health(true, 40, players.get() / 40.0, "nethernet", "fixture"), message -> {});
+            try {
+                client.start().get(20, TimeUnit.SECONDS);
+                eventually(() -> stub.controlPolls == 1);
+                Thread.sleep(2200);
+                assertEquals(1, stub.heartbeats); assertEquals(1, stub.controlPolls);
+                for (int i = 0; i < 100; i++) client.requestStatusRefresh();
+                Thread.sleep(1200); assertEquals(1, stub.heartbeats, "Unchanged local refreshes must not send requests");
+                stub.checkInMillis = 1000; players.set(1); client.requestStatusRefresh();
+                eventually(() -> stub.lastHeartbeat.getAsJsonObject("serverStatus").get("players").getAsInt() == 1);
+                int busyBefore = stub.heartbeats;
+                eventually(() -> stub.heartbeats > busyBefore && stub.controlPolls > 1);
+                stub.checkInMillis = 3600000; players.set(0); client.requestStatusRefresh();
+                eventually(() -> stub.lastHeartbeat.getAsJsonObject("serverStatus").get("players").getAsInt() == 0);
+                Thread.sleep(2200); int before = stub.heartbeats; int polls = stub.controlPolls;
+                Thread.sleep(2200); assertEquals(before, stub.heartbeats); assertEquals(polls, stub.controlPolls);
+            } finally { client.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+            assertTrue(stub.draining, "Orderly shutdown still reports drain while the timer is asleep");
+            int beforeRestart = stub.heartbeats;
+            FakeTransport replacement = new FakeTransport(); replacement.stateless = true;
+            stub.checkInMillis = 900000;
+            ProviderClient resumed = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Scheduled", null, null, null),
+                new ProviderStateStore(path), replacement, () -> new ServerStatus("Restarted", 1234, "fixture", "world", 0, 40, 0),
+                () -> new ProviderClient.Health(true, 40, 0, "nethernet", "fixture"), message -> {});
+            try {
+                resumed.start().get(20, TimeUnit.SECONDS);
+                assertEquals(2, stub.generation);
+                assertEquals(beforeRestart + 1, stub.heartbeats, "Startup must publish immediately despite the previous one-hour schedule");
+                assertEquals("Restarted", stub.lastHeartbeat.getAsJsonObject("serverStatus").get("name").getAsString());
+            } finally { resumed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+
+        }
+    }
     static final class FakeTransport implements ProviderTransport {
         final CompletableFuture<Void> closed = new CompletableFuture<>();
         volatile int installed, applied, admissions, drains;
+        boolean stateless;
         volatile ApplyResult result = ApplyResult.APPLIED;
-        public CompletionStage<JsonObject> hostProfile() { JsonObject p = new JsonObject(); p.addProperty("credentialKeyId", "T001"); p.addProperty("dtlsFingerprint", "fixture-native-profile"); return CompletableFuture.completedFuture(p); }
+        public CompletionStage<JsonObject> hostProfile() { JsonObject p = new JsonObject(); p.addProperty("credentialKeyId", "T001"); p.addProperty("dtlsFingerprint", "fixture-native-profile"); if (stateless) p.add("statelessAdmission", new JsonObject()); return CompletableFuture.completedFuture(p); }
         public CompletionStage<Void> installTicketKeys(List<TicketKey> keys) { installed = keys.size(); return CompletableFuture.completedFuture(null); }
         public CompletionStage<ApplyResult> applyControl(JsonObject c) {
             applied++; String kind = c.get("kind").getAsString();

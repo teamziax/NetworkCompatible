@@ -89,3 +89,17 @@ CI archives `0.1.0-registration-<full commit SHA>` module artifacts with test
 reports. No Maven publication, upstream merge or production deployment occurs.
 Geyser's composite build resolves both modules from this checkout; use its pinned
 `registration-network.properties` commit when assembling the reviewed artifacts.
+## Control-plane check-in schedules
+
+Stateless hosts negotiate `limits.checkInVersion: 1` and follow each heartbeat's
+`checkIn` response. The control plane owns active/idle timing; subsequent policy
+changes do not require another client release. Absent negotiation, legacy timing
+is preserved. Clients validate the schedule, count network time against the lease,
+and use a monotonic timer. Control polling backs off alongside idle heartbeats.
+
+Local status observation continues without network calls. Changes to player count,
+status metadata, health or capacity wake reporting with bounded coalescing. Ticket
+event reporting stays asynchronous and independent. Every process start activates
+a new generation and publishes immediately; no idle timer survives a restart.
+Orderly shutdown still reports drain. The provider must clear idle age on activation
+and honour the absolute lease/profile/status deadlines it granted.
