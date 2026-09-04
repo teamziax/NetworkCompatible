@@ -119,8 +119,9 @@ class ProviderClientTest {
             JsonObject registration = client.start().get(20, TimeUnit.SECONDS);
             assertEquals("example-machine-1", registration.get("instanceId").getAsString()); assertEquals(1, stub.registrations); assertEquals(1, host.installed);
             assertEquals(100, stub.lastHeartbeat.get("capacity").getAsInt()); assertEquals(40, stub.lastHeartbeat.getAsJsonObject("serverStatus").get("maxPlayers").getAsInt());
-            players.set(7); Thread.sleep(2200); assertEquals(7, stub.lastHeartbeat.getAsJsonObject("serverStatus").get("players").getAsInt());
-            client.setServerStatus(new ServerStatus("Renamed", 1234, "preview-fixture", "World", 8, 30, 2)); Thread.sleep(2200); assertEquals("Renamed", stub.lastHeartbeat.getAsJsonObject("serverStatus").get("name").getAsString());
+            players.set(7); eventually(() -> stub.lastHeartbeat.getAsJsonObject("serverStatus").get("players").getAsInt() == 7);
+            client.setServerStatus(new ServerStatus("Renamed", 1234, "preview-fixture", "World", 8, 30, 2));
+            eventually(() -> "Renamed".equals(stub.lastHeartbeat.getAsJsonObject("serverStatus").get("name").getAsString()));
             assertTrue(client.readiness().get(10, TimeUnit.SECONDS).get("routable").getAsBoolean());
             client.rotateMachineKey().get(10, TimeUnit.SECONDS); client.drain().get(10, TimeUnit.SECONDS); assertTrue(stub.draining);
             client.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
