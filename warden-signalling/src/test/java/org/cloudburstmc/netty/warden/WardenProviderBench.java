@@ -14,6 +14,7 @@ public final class WardenProviderBench {
         Path state = Path.of(System.getProperty("providerState"));
         if (System.getProperty("providerMode", "once").equals("identity")) { try (var store = new ProviderStateStore(state)) { System.out.println(ProviderIdentity.initialize(store, provider)); } return; }
         String grantPath = System.getProperty("providerGrantFile"), grant = grantPath == null ? null : Files.readString(Path.of(grantPath)).trim();
+        String token = System.getProperty("providerToken");
         ProviderTransport transport = new ProviderTransport() {
             String keyId;
             public CompletionStage<Void> installTicketKeys(List<TicketKey> keys) { keyId = keys.getLast().keyId(); return CompletableFuture.completedFuture(null); }
@@ -26,7 +27,14 @@ public final class WardenProviderBench {
             public CompletionStage<Void> drain() { return CompletableFuture.completedFuture(null); }
             public CompletionStage<Void> close() { return CompletableFuture.completedFuture(null); }
         };
-        var config = new ProviderClient.Configuration(provider, "warden-admission-v1", "Java conformance backend", grant, grant == null ? null : "EU", grant == null ? null : "proxy");
+        String registrationMode = System.getProperty("providerRegistrationMode", grant == null && token == null ? ProviderClient.NEW_SERVICE : ProviderClient.ATTACH_INSTANCE);
+        String authorization = token != null ? ProviderClient.BEARER_TOKEN : grant != null ? ProviderClient.BOOTSTRAP_GRANT : ProviderClient.ANONYMOUS_PROOF_OF_WORK;
+        Map<String, String> tags = new TreeMap<>();
+        JsonObject configuredTags = JsonParser.parseString(System.getProperty("providerTags", "{}")).getAsJsonObject();
+        for (var entry : configuredTags.entrySet()) tags.put(entry.getKey(), entry.getValue().getAsString());
+        String region = System.getProperty("providerRegion", registrationMode.equals(ProviderClient.ATTACH_INSTANCE) ? "EU" : null);
+        String pool = System.getProperty("providerPool", registrationMode.equals(ProviderClient.ATTACH_INSTANCE) ? "proxy" : null);
+        var config = new ProviderClient.Configuration(provider, "warden-admission-v1", "Java conformance backend", registrationMode, authorization, token, grant, region, pool, tags);
         var client = new ProviderClient(config, new ProviderStateStore(state), transport, () -> new ServerStatus("Java bench", 1234, "fixture-only", "Fixture", 2, 50, 0), () -> new ProviderClient.Health(true, 100, 0.02, "nethernet", "java-conformance"), System.err::println);
         try {
             JsonObject registration = client.start().get(30, TimeUnit.SECONDS);

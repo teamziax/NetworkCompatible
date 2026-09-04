@@ -12,7 +12,7 @@ import java.util.concurrent.*;
 public final class IndependentProviderStub implements AutoCloseable {
     final HttpServer server;
     final String origin;
-    final Map<String, JsonObject> challenges = new HashMap<>(), keys = new HashMap<>();
+    final Map<String, JsonObject> challenges = new HashMap<>(), keys = new HashMap<>(), placements = new HashMap<>();
     JsonObject registration; volatile JsonObject lastHeartbeat;
     volatile int failHeartbeats;
     volatile long checkInMillis;
@@ -20,6 +20,8 @@ public final class IndependentProviderStub implements AutoCloseable {
     final java.util.List<JsonObject> events = new java.util.concurrent.CopyOnWriteArrayList<>();
     long generation, sequence;
     volatile int registrations, heartbeats, acknowledgements;
+    volatile String challengeAuthorization;
+    volatile int challengeDifficulty = -1;
     volatile boolean optionalClaim;
     volatile int claimActions;
     boolean draining;
@@ -44,16 +46,28 @@ public final class IndependentProviderStub implements AutoCloseable {
             JsonObject operations = new JsonObject(); for (String op : List.of("challenges", "complete", "recover", "activate", "heartbeat", "host-profile", "readiness", "control", "control/ack", "drain", "rotate", "retire", "ticket-keys", "ticket-keys/ack", "ticket-events", "events")) operations.addProperty(op, origin + "/example/" + op);
             if (optionalClaim) operations.addProperty("claim-action", origin + "/example/claim-action");
             d.add("operations", operations); JsonObject limits = new JsonObject(); limits.addProperty("heartbeatIntervalMs", 1000); if (checkInMillis > 0) limits.addProperty("checkInVersion", 1); limits.addProperty("maxControlPage", 100); limits.addProperty("leaseMs", 30000); limits.addProperty("maxBodyBytes", 65536); limits.addProperty("clockSkewMs", 60000); d.add("limits", limits);
-            JsonObject policy = new JsonObject(); policy.addProperty("newServiceClaim", "none"); policy.addProperty("anonymousPow", true); policy.addProperty("attachmentPow", false); d.add("policy", policy); return d;
+            JsonObject policy = new JsonObject(); policy.addProperty("newServiceClaim", "none"); policy.addProperty("anonymousPow", true); policy.addProperty("attachmentPow", false); d.add("policy", policy);
+            JsonObject authorization = new JsonObject(); authorization.addProperty("header", "Authorization"); JsonArray schemes = new JsonArray();
+            schemes.add(authorizationScheme("anonymous-proof-of-work", "new-service")); schemes.add(authorizationScheme("bearer-token", "new-service", "attach-instance")); schemes.add(authorizationScheme("bootstrap-grant", "attach-instance")); authorization.add("schemes", schemes); d.add("authorization", authorization); return d;
         }
         if (path.equals("/example/challenges") || path.equals("/example/recover")) {
             boolean recovery = path.endsWith("recover");
             if (recovery && (registration == null || !registration.get("registrationId").equals(body.get("registrationId")))) throw new Failure(403, "recovery_unavailable");
             JsonObject key = recovery ? keys.get(registration.get("keyId").getAsString()) : body.getAsJsonObject("publicKeyJwk");
             if (!recovery && !body.get("mode").getAsString().equals("new-service")) throw new Failure(403, "bootstrap_grant_required");
+            String authorization = recovery ? "recovery" : body.getAsJsonObject("authorization").get("scheme").getAsString();
+            if (authorization.equals("bearer-token")) {
+                challengeAuthorization = e.getRequestHeaders().getFirst("Authorization");
+                if (!"Bearer independent-provider-token".equals(challengeAuthorization)) throw new Failure(401, "invalid_bearer_token");
+            }
             JsonObject c = new JsonObject(); c.addProperty("protocol", ProviderCrypto.PROTOCOL); c.addProperty("signature", ProviderCrypto.SIGNATURE); c.addProperty("challengeId", UUID.randomUUID().toString()); c.addProperty("audience", origin); c.addProperty("nonce", UUID.randomUUID().toString()); c.addProperty("thumbprint", ProviderCrypto.thumbprint(key)); c.addProperty("expiresAt", System.currentTimeMillis() + 60000); c.addProperty("serverTime", System.currentTimeMillis());
-            JsonObject context = new JsonObject(); for (String f : List.of("label", "grantId", "serviceId", "region", "pool", "registrationId")) context.addProperty(f, ""); context.addProperty("mode", recovery ? "recover" : "new-service"); context.addProperty("profile", "example-profile-v0"); c.add("context", context); c.addProperty("contextDigest", ProviderCrypto.contextDigest(context)); JsonObject pow = new JsonObject(); pow.addProperty("algorithm", "sha256-leading-zero-bits-v0"); pow.addProperty("difficulty", recovery ? 0 : 2); c.add("pow", pow);
-            challenges.put(c.get("challengeId").getAsString(), c.deepCopy()); keys.put(c.get("challengeId").getAsString(), key); return c;
+            JsonObject context = new JsonObject(); for (String f : List.of("label", "grantId", "serviceId", "region", "pool", "registrationId")) context.addProperty(f, ""); context.addProperty("mode", recovery ? "recover" : "new-service"); context.addProperty("profile", "example-profile-v0");
+            if (!recovery && authorization.equals("bearer-token")) { context.addProperty("grantId", "independent-authority"); JsonObject selected = new JsonObject(); selected.addProperty("scheme", authorization); selected.addProperty("reference", "independent-authority"); c.add("authorization", selected); }
+            if (!recovery && body.has("placement")) { JsonObject placement = body.getAsJsonObject("placement"); context.add("region", placement.get("region")); context.add("pool", placement.get("pool")); if (placement.has("tags")) { Map<String, String> tags = new TreeMap<>(); for (var tag : placement.getAsJsonObject("tags").entrySet()) tags.put(tag.getKey(), tag.getValue().getAsString()); context.addProperty("tagsDigest", ProviderCrypto.tagsDigest(tags)); } }
+            c.add("context", context); c.addProperty("contextDigest", ProviderCrypto.contextDigest(context)); JsonObject pow = new JsonObject(); pow.addProperty("algorithm", "sha256-leading-zero-bits-v0"); challengeDifficulty = recovery || authorization.equals("bearer-token") ? 0 : 2; pow.addProperty("difficulty", challengeDifficulty); c.add("pow", pow);
+            challenges.put(c.get("challengeId").getAsString(), c.deepCopy()); keys.put(c.get("challengeId").getAsString(), key);
+            if (!recovery && body.has("placement")) placements.put(c.get("challengeId").getAsString(), body.getAsJsonObject("placement").deepCopy());
+            return c;
         }
         if (path.equals("/example/complete")) {
             String id = body.get("challengeId").getAsString(); JsonObject c = challenges.get(id);
@@ -63,7 +77,7 @@ public final class IndependentProviderStub implements AutoCloseable {
             challenges.remove(id);
             if (c.getAsJsonObject("context").get("mode").getAsString().equals("recover")) { JsonObject r = registration.deepCopy(); r.remove("ticketKey"); r.addProperty("leaseGeneration", generation); return r; }
             if (registration != null) throw new Failure(409, "already_registered"); registrations++;
-            registration = new JsonObject(); registration.addProperty("protocol", ProviderCrypto.PROTOCOL); registration.addProperty("provider", origin); registration.addProperty("registrationId", id); registration.addProperty("instanceId", "example-machine-1"); registration.addProperty("serviceId", "example-service-1"); registration.addProperty("keyId", "example-key-1"); registration.addProperty("publicAddress", "https://play.example.invalid"); registration.addProperty("profile", "example-profile-v0"); registration.addProperty("leaseGeneration", 0); registration.addProperty("leaseDeadline", 0); registration.addProperty("heartbeatIntervalMs", 1000); JsonObject ready = new JsonObject(); ready.addProperty("routable", false); ready.add("reasons", new JsonArray()); registration.add("readiness", ready); JsonObject place = new JsonObject(); place.addProperty("region", ""); place.addProperty("pool", ""); registration.add("placement", place); registration.add("ticketKey", ticket()); keys.put("example-key-1", keys.get(id)); return registration.deepCopy();
+            registration = new JsonObject(); registration.addProperty("protocol", ProviderCrypto.PROTOCOL); registration.addProperty("provider", origin); registration.addProperty("registrationId", id); registration.addProperty("instanceId", "example-machine-1"); registration.addProperty("serviceId", "example-service-1"); registration.addProperty("keyId", "example-key-1"); registration.addProperty("publicAddress", "https://play.example.invalid"); registration.addProperty("profile", "example-profile-v0"); registration.addProperty("leaseGeneration", 0); registration.addProperty("leaseDeadline", 0); registration.addProperty("heartbeatIntervalMs", 1000); JsonObject ready = new JsonObject(); ready.addProperty("routable", false); ready.add("reasons", new JsonArray()); registration.add("readiness", ready); JsonObject place = placements.getOrDefault(id, new JsonObject()).deepCopy(); if (!place.has("region")) place.addProperty("region", ""); if (!place.has("pool")) place.addProperty("pool", ""); registration.add("placement", place); registration.add("ticketKey", ticket()); keys.put("example-key-1", keys.get(id)); return registration.deepCopy();
         }
         if (path.equals("/example/heartbeat") && failHeartbeats-- > 0) throw new Failure(503, "fixture_transient");
         authenticate(e, raw);
@@ -109,6 +123,7 @@ public final class IndependentProviderStub implements AutoCloseable {
         } catch (RuntimeException f) { throw new Failure(401, "auth_invalid"); }
     }
     private static JsonArray strings(String... strings) { JsonArray a = new JsonArray(); for (String s : strings) a.add(s); return a; }
+    private static JsonObject authorizationScheme(String scheme, String... modes) { JsonObject value = new JsonObject(); value.addProperty("scheme", scheme); value.add("modes", strings(modes)); return value; }
     private static JsonObject ticket() { JsonObject key = new JsonObject(); key.addProperty("keyId", "T001"); key.addProperty("secret", "independent-stub-only-secret"); return key; }
     private static final class Failure extends Exception { final int status; Failure(int status, String message) { super(message); this.status = status; } }
     @Override public void close() { server.stop(0); }

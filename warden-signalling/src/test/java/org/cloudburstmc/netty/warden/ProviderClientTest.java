@@ -11,6 +11,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProviderClientTest {
+    @Test void usesProviderNeutralBearerAuthorizationWithoutPowOrPersistingTheToken(@TempDir Path path) throws Exception {
+        try (IndependentProviderStub stub = new IndependentProviderStub()) {
+            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Hosted customer",
+                ProviderClient.NEW_SERVICE, ProviderClient.BEARER_TOKEN, "independent-provider-token", null, "EU", "customers", Map.of("plan", "premium"));
+            ProviderClient client = new ProviderClient(config, new ProviderStateStore(path), new FakeTransport(), () -> null,
+                () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {});
+            try {
+                JsonObject registration = client.start().get(20, TimeUnit.SECONDS);
+                assertEquals("example-machine-1", registration.get("instanceId").getAsString());
+                assertEquals("Bearer independent-provider-token", stub.challengeAuthorization);
+                assertEquals(0, stub.challengeDifficulty);
+                assertFalse(java.nio.file.Files.readString(path.resolve("provider-state.json")).contains("independent-provider-token"));
+                assertFalse(config.toString().contains("independent-provider-token"));
+            } finally { client.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+        }
+    }
+
     @Test void refreshesAnExpiredOptionalClaimWithoutBlockingReadiness(@TempDir Path path) throws Exception {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             stub.optionalClaim = true;
@@ -102,8 +119,9 @@ class ProviderClientTest {
             JsonObject registration = client.start().get(20, TimeUnit.SECONDS);
             assertEquals("example-machine-1", registration.get("instanceId").getAsString()); assertEquals(1, stub.registrations); assertEquals(1, host.installed);
             assertEquals(100, stub.lastHeartbeat.get("capacity").getAsInt()); assertEquals(40, stub.lastHeartbeat.getAsJsonObject("serverStatus").get("maxPlayers").getAsInt());
-            players.set(7); Thread.sleep(2200); assertEquals(7, stub.lastHeartbeat.getAsJsonObject("serverStatus").get("players").getAsInt());
-            client.setServerStatus(new ServerStatus("Renamed", 1234, "preview-fixture", "World", 8, 30, 2)); Thread.sleep(2200); assertEquals("Renamed", stub.lastHeartbeat.getAsJsonObject("serverStatus").get("name").getAsString());
+            players.set(7); eventually(() -> stub.lastHeartbeat.getAsJsonObject("serverStatus").get("players").getAsInt() == 7);
+            client.setServerStatus(new ServerStatus("Renamed", 1234, "preview-fixture", "World", 8, 30, 2));
+            eventually(() -> "Renamed".equals(stub.lastHeartbeat.getAsJsonObject("serverStatus").get("name").getAsString()));
             assertTrue(client.readiness().get(10, TimeUnit.SECONDS).get("routable").getAsBoolean());
             client.rotateMachineKey().get(10, TimeUnit.SECONDS); client.drain().get(10, TimeUnit.SECONDS); assertTrue(stub.draining);
             client.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
