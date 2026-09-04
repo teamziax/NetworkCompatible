@@ -8,7 +8,8 @@ dependencies {
     api(libs.bundles.netty)
     api(libs.netty.codec.http)
     api(libs.expiringmap)
-    api(libs.libdatachannel.java)
+    api("dev.ziax.warden:libdatachannel-java:${rootProject.property("wardenNativeVersion")}")
+    testRuntimeOnly("dev.ziax.warden:libdatachannel-java:${rootProject.property("wardenNativeVersion")}:x86_64")
 
     implementation(libs.gson)
     implementation(libs.jose4j)

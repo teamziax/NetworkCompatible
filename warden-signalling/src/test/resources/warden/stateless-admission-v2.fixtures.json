@@ -1,0 +1,47 @@
+{
+  "kind": "warden-stateless-admission-vectors",
+  "version": 2,
+  "experimental": true,
+  "warning": "Public deterministic test material only. Never use fixture keys/nonces in production.",
+  "context": {
+    "keyId": "K001",
+    "secret": "stateless-fixture-secret-32-bytes-minimum",
+    "audience": "sig_fixture/gs_one/profile_boot_001"
+  },
+  "claims": {
+    "expiresAt": 1788484830000,
+    "clientFingerprintHex": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "clientIcePwd": "clientPassword01234567890",
+    "clientSctpPort": 5000,
+    "clientMaxMessageSize": 262144,
+    "playerIdentityHashHex": "abcdef0123456789abcdef0123456789",
+    "networkId": "18446744073709551615"
+  },
+  "clientIceUfrag": "clientFixtureUf",
+  "nonceHex": "000102030405060708090a0b",
+  "now": 1788484800000,
+  "maxTtlMs": 60000,
+  "expected": {
+    "localUfrag": "WDA2K001AAECAwQFBgcICQoLRB67tUgz59tXYrwtBwzY4DewLieXBCXFXqkaCStTUjeD0N47UPU8GhwnmvM1Mxy7soTgrqdWZM4/wS6/TXOm4L0LoRApZCB/Vv/ROFRvCnKtpLiw2svLPrqof/4cjk9fqwL9SXOLqQMYEKZk",
+    "icePwd": "unwhe3iOdSU5v4viIOjU0pNpjEQRVYNM",
+    "ufragLength": 168
+  },
+  "budget": {
+    "headerAscii": 8,
+    "nonceBytes": 12,
+    "fixedPlaintextBytes": 67,
+    "tagBytes": 16,
+    "maxUfragChars": 256,
+    "maxPasswordBytes": 91
+  },
+  "rejections": [
+    "tampered-ciphertext",
+    "expired",
+    "wrong-host",
+    "wrong-profile-incarnation",
+    "wrong-key",
+    "wrong-client-ufrag",
+    "password-over-budget",
+    "noncanonical-base64"
+  ]
+}
