@@ -14,26 +14,22 @@ import java.util.function.*;
 /** One asynchronous, serialized control lifecycle per backend, never one poller per player. */
 public final class ProviderClient implements AutoCloseable {
     public static final String NEW_SERVICE = "new-service", ATTACH_INSTANCE = "attach-instance";
-    public static final String ANONYMOUS_PROOF_OF_WORK = "anonymous-proof-of-work", BEARER_TOKEN = "bearer-token", BOOTSTRAP_GRANT = "bootstrap-grant";
+    public static final String ANONYMOUS_PROOF_OF_WORK = "anonymous-proof-of-work", BEARER_TOKEN = "bearer-token";
     public record Configuration(URI provider, String profile, String label, String registrationMode, String authorizationScheme,
-                                String authorizationToken, String bootstrapGrant, String region, String pool, Map<String, String> tags) {
+                                String authorizationToken, String region, String pool, Map<String, String> tags) {
         public Configuration {
             Objects.requireNonNull(provider); Objects.requireNonNull(profile); Objects.requireNonNull(registrationMode); Objects.requireNonNull(authorizationScheme);
             tags = tags == null ? Map.of() : Collections.unmodifiableMap(new TreeMap<>(tags));
             if (!Set.of(NEW_SERVICE, ATTACH_INSTANCE).contains(registrationMode)) throw new IllegalArgumentException("Invalid provider registration mode");
-            if (!Set.of(ANONYMOUS_PROOF_OF_WORK, BEARER_TOKEN, BOOTSTRAP_GRANT).contains(authorizationScheme)) throw new IllegalArgumentException("Invalid provider authorization scheme");
+            if (!Set.of(ANONYMOUS_PROOF_OF_WORK, BEARER_TOKEN).contains(authorizationScheme)) throw new IllegalArgumentException("Invalid provider authorization scheme");
             if ((BEARER_TOKEN.equals(authorizationScheme)) != (authorizationToken != null && !authorizationToken.isBlank())) throw new IllegalArgumentException("Bearer authorization requires exactly one token");
-            if ((BOOTSTRAP_GRANT.equals(authorizationScheme)) != (bootstrapGrant != null && !bootstrapGrant.isBlank())) throw new IllegalArgumentException("Bootstrap authorization requires exactly one grant");
             if (ANONYMOUS_PROOF_OF_WORK.equals(authorizationScheme) && !NEW_SERVICE.equals(registrationMode)) throw new IllegalArgumentException("Anonymous proof of work can only create a service");
-            if (BOOTSTRAP_GRANT.equals(authorizationScheme) && !ATTACH_INSTANCE.equals(registrationMode)) throw new IllegalArgumentException("Bootstrap grants can only attach an instance");
             if (ATTACH_INSTANCE.equals(registrationMode) && (region == null || region.isBlank() || pool == null || pool.isBlank())) throw new IllegalArgumentException("Attached instances require region and pool");
             if ((region == null) != (pool == null) || (!tags.isEmpty() && region == null)) throw new IllegalArgumentException("Provider placement requires region and pool together");
             if (tags.size() > 16 || tags.entrySet().stream().anyMatch(e -> !e.getKey().matches("[A-Za-z0-9_.-]{1,32}") || e.getValue() == null || !e.getValue().equals(e.getValue().trim()) || e.getValue().isEmpty() || e.getValue().length() > 64)) throw new IllegalArgumentException("Invalid provider placement tags");
         }
-        /** Compatibility constructor for the original anonymous/grant configuration. */
-        public Configuration(URI provider, String profile, String label, String bootstrapGrant, String region, String pool) {
-            this(provider, profile, label, bootstrapGrant == null ? NEW_SERVICE : ATTACH_INSTANCE,
-                bootstrapGrant == null ? ANONYMOUS_PROOF_OF_WORK : BOOTSTRAP_GRANT, null, bootstrapGrant, region, pool, Map.of());
+        public Configuration(URI provider, String profile, String label) {
+            this(provider, profile, label, NEW_SERVICE, ANONYMOUS_PROOF_OF_WORK, null, null, null, Map.of());
         }
         @Override public String toString() { return "Configuration[provider=" + provider + ", profile=" + profile + ", registrationMode=" + registrationMode + ", authorizationScheme=" + authorizationScheme + "]"; }
     }
@@ -165,7 +161,6 @@ public final class ProviderClient implements AutoCloseable {
             JsonObject request = new JsonObject(); request.addProperty("protocol", ProviderCrypto.PROTOCOL); request.addProperty("mode", config.registrationMode());
             request.addProperty("profile", config.profile()); request.add("publicKeyJwk", state.get("publicKeyJwk")); if (config.label() != null) request.addProperty("label", config.label());
             JsonObject authorization = new JsonObject(); authorization.addProperty("scheme", config.authorizationScheme()); request.add("authorization", authorization);
-            if (config.bootstrapGrant() != null) request.addProperty("bootstrapGrant", config.bootstrapGrant());
             if (config.region() != null) { JsonObject p = new JsonObject(); p.addProperty("region", config.region()); p.addProperty("pool", config.pool()); if (!config.tags().isEmpty()) p.add("tags", JSON.toJsonTree(config.tags())); request.add("placement", p); }
             challenge = unsigned("challenges", request, config.authorizationToken()); state.add("challenge", challenge); save();
         }
