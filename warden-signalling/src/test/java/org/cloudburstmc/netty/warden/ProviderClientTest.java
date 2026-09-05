@@ -14,7 +14,7 @@ class ProviderClientTest {
     @Test void usesProviderNeutralBearerAuthorizationWithoutPowOrPersistingTheToken(@TempDir Path path) throws Exception {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Hosted customer",
-                ProviderClient.NEW_SERVICE, ProviderClient.BEARER_TOKEN, "independent-provider-token", null, "EU", "customers", Map.of("plan", "premium"));
+                ProviderClient.NEW_SERVICE, ProviderClient.BEARER_TOKEN, "independent-provider-token", "EU", "customers", Map.of("plan", "premium"));
             ProviderClient client = new ProviderClient(config, new ProviderStateStore(path), new FakeTransport(), () -> null,
                 () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {});
             try {
@@ -31,7 +31,7 @@ class ProviderClientTest {
     @Test void refreshesAnExpiredOptionalClaimWithoutBlockingReadiness(@TempDir Path path) throws Exception {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             stub.optionalClaim = true;
-            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example", null, null, null);
+            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example");
             java.util.function.Supplier<ProviderClient> create = () -> {
                 try { return new ProviderClient(config, new ProviderStateStore(path), new FakeTransport(), () -> null,
                     () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {}); }
@@ -59,7 +59,7 @@ class ProviderClientTest {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             stub.checkInMillis = 900000;
             AtomicInteger players = new AtomicInteger(0); FakeTransport transport = new FakeTransport(); transport.stateless = true;
-            ProviderClient client = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Scheduled", null, null, null),
+            ProviderClient client = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Scheduled"),
                 new ProviderStateStore(path), transport, () -> new ServerStatus("Scheduled", 1234, "fixture", "world", players.get(), 40, 0),
                 () -> new ProviderClient.Health(true, 40, players.get() / 40.0, "nethernet", "fixture"), message -> {});
             try {
@@ -82,7 +82,7 @@ class ProviderClientTest {
             int beforeRestart = stub.heartbeats;
             FakeTransport replacement = new FakeTransport(); replacement.stateless = true;
             stub.checkInMillis = 900000;
-            ProviderClient resumed = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Scheduled", null, null, null),
+            ProviderClient resumed = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Scheduled"),
                 new ProviderStateStore(path), replacement, () -> new ServerStatus("Restarted", 1234, "fixture", "world", 0, 40, 0),
                 () -> new ProviderClient.Health(true, 40, 0, "nethernet", "fixture"), message -> {});
             try {
@@ -114,7 +114,7 @@ class ProviderClientTest {
     @Test void portableRegistrationRefreshRotationAndRestart(@TempDir Path path) throws Exception {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             AtomicInteger players = new AtomicInteger(2); FakeTransport host = new FakeTransport();
-            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example", null, null, null);
+            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example");
             ProviderClient client = new ProviderClient(config, new ProviderStateStore(path), host, () -> new ServerStatus("Example", 1234, "preview-fixture", "", players.get(), 40, 0), () -> new ProviderClient.Health(true, 100, 0.1, "nethernet", "fixture"), message -> {});
             JsonObject registration = client.start().get(20, TimeUnit.SECONDS);
             assertEquals("example-machine-1", registration.get("instanceId").getAsString()); assertEquals(1, stub.registrations); assertEquals(1, host.installed);
@@ -137,7 +137,7 @@ class ProviderClientTest {
     @Test void failedRefreshRetriesCoalescingAndPendingAdmissionRecovery(@TempDir Path path) throws Exception {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             AtomicInteger players = new AtomicInteger(2); FakeTransport host = new FakeTransport();
-            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example", null, null, null);
+            var config = new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example");
             var health = (java.util.function.Supplier<ProviderClient.Health>) () -> new ProviderClient.Health(true, 100, 0.1, "nethernet", "fixture");
             ProviderClient client = new ProviderClient(config, new ProviderStateStore(path), host, () -> {
                 if (players.get() < 0) throw new IllegalStateException("query unavailable");
@@ -176,7 +176,7 @@ class ProviderClientTest {
     @Test void localPersistenceFailureStopsPublicationAndClosesTransport(@TempDir Path path) throws Exception {
         try (IndependentProviderStub stub = new IndependentProviderStub()) {
             FakeTransport host = new FakeTransport();
-            var client = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example", null, null, null), new ProviderStateStore(path), host, () -> null, () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {});
+            var client = new ProviderClient(new ProviderClient.Configuration(URI.create(stub.origin), "example-profile-v0", "Example"), new ProviderStateStore(path), host, () -> null, () -> new ProviderClient.Health(true, 10, 0, "nethernet", "fixture"), message -> {});
             client.start().get(20, TimeUnit.SECONDS);
             java.nio.file.Files.move(path.resolve("provider-state.json"), path.resolve("saved-state.json"));
             java.nio.file.Files.createDirectory(path.resolve("provider-state.json"));

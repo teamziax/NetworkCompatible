@@ -7,8 +7,8 @@
     ],
     "ext": true,
     "kty": "EC",
-    "x": "RKHXTHGwwJBKiOkXz86eQbrmZZENv6ZWc6u2KF04a8Sn2X_ZXxJ5hVNaDBjwq9ja",
-    "y": "Zz7lPI6wToxEXKGp3UmvG1YU5OT10sLjR9xtidUQ_FJg4tC3tKrhe08A08wjQcNZ",
+    "x": "7onqrvcQqP_J5uJk-j3M7KhZqAB3OwxxFkg2XodPmV9KmC7ALcVeK0CQ-pJqX88F",
+    "y": "7mSiEjHsP4o6StG48-3Vvb2BfG8WTuYxmfrYmaS_CZDVHoWibgPWvmkGUbVQG9xq",
     "crv": "P-384"
   },
   "privateKeyJwk": {
@@ -17,10 +17,10 @@
     ],
     "ext": true,
     "kty": "EC",
-    "x": "RKHXTHGwwJBKiOkXz86eQbrmZZENv6ZWc6u2KF04a8Sn2X_ZXxJ5hVNaDBjwq9ja",
-    "y": "Zz7lPI6wToxEXKGp3UmvG1YU5OT10sLjR9xtidUQ_FJg4tC3tKrhe08A08wjQcNZ",
+    "x": "7onqrvcQqP_J5uJk-j3M7KhZqAB3OwxxFkg2XodPmV9KmC7ALcVeK0CQ-pJqX88F",
+    "y": "7mSiEjHsP4o6StG48-3Vvb2BfG8WTuYxmfrYmaS_CZDVHoWibgPWvmkGUbVQG9xq",
     "crv": "P-384",
-    "d": "Hrv5AY11JMEixKkBF_WPD7LjOTj45HS916I8HjTed26RgqS5TTym2VWwOqUSc5Fg"
+    "d": "yjEPqO0LygBnf919VCmdziREaPgeFeCT4M4QC_lW1Nvkda9iOoZHuRlQAUUGYua4"
   },
   "challenge": {
     "protocol": "nethernet-provider-registration-v0",
@@ -28,19 +28,19 @@
     "challengeId": "challenge_fixture",
     "nonce": "8WH8OdS12DO6ju0_",
     "audience": "https://provider.example",
-    "thumbprint": "G-978TMXnR9ZTNyxvCHVjoNQOSjoI0FcDtL0Zxt0SFs",
+    "thumbprint": "FV0R5dHP--qigTPgspmBk6zImSz6BhG0368xJW7Gxlo",
     "context": {
       "mode": "attach-instance",
       "profile": "warden-admission-v1",
       "label": "EU café 🦊\n<proxy>",
-      "grantId": "grant_fixture",
+      "authorizationId": "auth_fixture",
       "serviceId": "service_neutral",
       "region": "EU",
       "pool": "proxy",
       "registrationId": "",
       "tagsDigest": "CEHUNj2V3qUPpjRczgqi9TCVca5-uQ8g29G8YT4qtng"
     },
-    "contextDigest": "YX4iETRL1CTWqj9eb1X8dCtwUftLOwBYip7wIWWq5z4",
+    "contextDigest": "DTwLRzAGOrGGijNIcREJkG3gAilzV11QII6FtjLSxk0",
     "expiresAt": 1788484800000,
     "serverTime": 1788484200000,
     "pow": {
@@ -48,15 +48,15 @@
       "difficulty": 0
     },
     "authorization": {
-      "scheme": "bootstrap-grant",
-      "reference": "grant_fixture"
+      "scheme": "bearer-token",
+      "reference": "auth_fixture"
     }
   },
   "proofNonce": "0",
   "idempotencyKey": "intent_fixture_0001",
   "proof": {
-    "payload": "[\"nethernet-provider-registration-v0\",\"complete\",\"https://provider.example\",\"challenge_fixture\",\"8WH8OdS12DO6ju0_\",\"G-978TMXnR9ZTNyxvCHVjoNQOSjoI0FcDtL0Zxt0SFs\",\"YX4iETRL1CTWqj9eb1X8dCtwUftLOwBYip7wIWWq5z4\",1788484800000,\"0\",\"intent_fixture_0001\"]",
-    "signature": "9qlt-nUuPGdcrrkPzk0bhr9PGKXaYvyPibNNcNqIw5JJ22795YJZu9--HTIh_BRWvEgfXAIpuf3aMdqoza_XB1t46X1CIa-ElXREtXmVYYF9kffLuumIRItvdQ1CBi0i"
+    "payload": "[\"nethernet-provider-registration-v0\",\"complete\",\"https://provider.example\",\"challenge_fixture\",\"8WH8OdS12DO6ju0_\",\"FV0R5dHP--qigTPgspmBk6zImSz6BhG0368xJW7Gxlo\",\"DTwLRzAGOrGGijNIcREJkG3gAilzV11QII6FtjLSxk0\",1788484800000,\"0\",\"intent_fixture_0001\"]",
+    "signature": "kZ7PH1WjPxseqDY7ChIaCo9JpDLoTTOfFXxu4-U1BSQ8m5KFogOloM-AXWLqclDeMaFXcZGC4QSlu9kWiu-2Mq5sU0ZZxbRpfSbyMVVGMKoNcctSnLaY4Gv5CQ46kyso"
   },
   "request": {
     "input": {
@@ -72,6 +72,6 @@
       "body": "{\"name\":\"café 🦊\",\"players\":0}\n"
     },
     "payload": "[\"nethernet-provider-registration-v0\",\"provider-es384-v0\",\"https://provider.example\",\"POST\",\"/renew?region=EU&label=caf%C3%A9\",1788484200123,\"machine_neutral\",\"key_fixture\",\"intent_fixture_0001\",2,17,\"hW1_XbRZsu7XCnVbFpxNepqnGsOafEGkN_VFWwKb4jQ\"]",
-    "signature": "d1vzbLuWkSDPQWXwtg5z86d_e_LE-AYr9Fm_tzqZtLe28fTHNTqqDepqOC4ZJGtN0C0hi-Lzh85rtCmtzZH4QDXMJajWWBPs6mQvI_iPlpPDl0iC5DBiXkoEgMN5w5gv"
+    "signature": "Qz_zDSnNPc6gkPTMBu2WzKxh99JtrBFGwP6PwT3uYh3qK34M2CeFL2MKvRIecjd-gfhOBcNptORVo3jyl-g46f27rMKVimlBfpXY__a8m3u3rHQcHJq5gEoGbOS7MHuP"
   }
 }

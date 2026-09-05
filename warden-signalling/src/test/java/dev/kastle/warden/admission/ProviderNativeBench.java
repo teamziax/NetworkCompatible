@@ -45,7 +45,7 @@ public final class ProviderNativeBench {
         try {
             nativeHost = NativeProviderTransport.open(bootstrap, new InetSocketAddress("127.0.0.1", port),
                 state.resolve("host-cert.pem"), state.resolve("host-key.pem"), new AdmissionGate.Limits(4, 8, 2, 10_000)).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            provider = new ProviderClient(new ProviderClient.Configuration(origin, "warden-admission-v1", "Provider native integration", null, null, null),
+            provider = new ProviderClient(new ProviderClient.Configuration(origin, "warden-admission-v1", "Provider native integration"),
                 new ProviderStateStore(state), nativeHost,
                 () -> new ServerStatus("Automatic native server", 1234, "fixture-only", "Integration", 0, 4, 0),
                 () -> new ProviderClient.Health(true, 4, 0, "nethernet", "provider-native-bench"), System.err::println);

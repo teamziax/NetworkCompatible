@@ -24,12 +24,11 @@ Registration combines one mode with one advertised authorization scheme:
 | Standalone server, no credential | `new-service` | `anonymous-proof-of-work` | New public service and machine identity |
 | Existing provider customer | `new-service` | `bearer-token` | Account-owned service with no PoW |
 | Autoscaled proxy replica | `attach-instance` | `bearer-token` | Machine in an existing service/pool with no PoW |
-| One-machine controller handoff | `attach-instance` | `bootstrap-grant` | Attachment using a short-lived key-bound grant |
 | Server host's own infrastructure | Either | Any advertised scheme | Registration stays at the configured host origin |
 
-Provider policy decides what a token represents. It may map to an account that
-can create services, or to a fixed service, region, pool, and tag set. That mapping
-is deliberately outside the protocol.
+Provider policy decides whether a token is reusable, short-lived, single-use or
+key-bound, and whether it can create services or attach to a fixed placement.
+Token issuance and exchange are outside this protocol.
 
 ## Discovery and trust
 
@@ -44,8 +43,7 @@ profiles, operations, authorization, policy, and limits. For example:
     "header": "Authorization",
     "schemes": [
       { "scheme": "anonymous-proof-of-work", "modes": ["new-service"] },
-      { "scheme": "bearer-token", "modes": ["new-service", "attach-instance"] },
-      { "scheme": "bootstrap-grant", "modes": ["attach-instance"] }
+      { "scheme": "bearer-token", "modes": ["new-service", "attach-instance"] }
     ]
   }
 }
@@ -62,7 +60,7 @@ responses, proof payloads, durable machine state, or logs.
 
 ## Challenge request
 
-First create and durably store a fresh P-384 machine key. A fleet request is:
+First create and durably store a fresh P-384 instance key. A fleet request is:
 
 ```json
 {
@@ -81,18 +79,17 @@ First create and durably store a fresh P-384 machine key. A fleet request is:
 ```
 
 `new-service` cannot name a service or instance. `attach-instance` requires an
-explicit placement and provider-resolved authority for the existing service. A
-`bootstrap-grant` request also carries `bootstrapGrant` in JSON; the grant should
-be short-lived and bound to the machine public-key thumbprint.
-
-For first-v0 compatibility, omitting `authorization` implies `bootstrap-grant`
-when `bootstrapGrant` is present, otherwise `anonymous-proof-of-work`. New clients
-should send the selection explicitly.
+explicit placement and a bearer token authorizing the existing service. Clients
+send the authorization selection explicitly.
 
 Placement contains `region`, `pool`, and at most 16 provider-defined tags. Tag
 keys match `[A-Za-z0-9_.-]{1,32}`. Values are trimmed, non-empty strings of at most
 64 characters. Tags are sorted by key for canonicalization. Providers authorize
 the exact placement; labels do not grant authority.
+
+An instance key identifies one logical instance, not a node or fleet. Concurrent
+instances must not share or copy a key or state directory. A restart of the same
+logical instance reuses its state; images and templates must not contain it.
 
 ## Proof of work and possession
 
@@ -110,7 +107,7 @@ integer epoch milliseconds, and empty strings for absent context strings. The ba
 context digest hashes:
 
 ```text
-[mode, profile, label, grantId, serviceId, region, pool, registrationId]
+[mode, profile, label, authorizationId, serviceId, region, pool, registrationId]
 ```
 
 When tags are non-empty, append `tagsDigest`: unpadded base64url SHA-256 of the
@@ -128,10 +125,10 @@ ES384 signatures are 96-byte P1363 `r || s`, unpadded base64url; DER is rejected
 PoW counts leading zero bits of SHA-256 over the same proof bytes. Completion sends
 `protocol`, `challengeId`, `proofNonce`, `idempotencyKey`, and `signature`.
 
-The provider revalidates token or grant authority at atomic completion. A token
-revoked after challenge creation fails closed. Challenge/grant consumption and all
-created resources commit together. Completion is single-use and must not replay
-one-time secrets.
+The provider revalidates token authority at atomic completion. A token revoked
+after challenge creation fails closed. Authority validation and all created
+resources commit together. Completion is single-use and must not replay one-time
+secrets.
 
 ## Result and lifecycle
 
@@ -141,7 +138,7 @@ return one-time ticket material needed by the profile. Anonymous creation may
 return an optional provider-account claim action. Token-owned creation should not
 require a second claim.
 
-Persist the private key before requesting a challenge, the challenge before
+Persist the instance private key before requesting a challenge, the challenge before
 completion, and returned IDs/key material before activation. On restart, use the
 discovered recovery operation and prove possession of the same key. Do not register
 a new machine merely because a process restarted.

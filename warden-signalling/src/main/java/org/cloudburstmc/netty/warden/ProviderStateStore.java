@@ -7,7 +7,7 @@ import java.nio.channels.*;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermissions;
 
-/** One process owns a directory; atomic file replacement precedes any readiness advertisement. */
+/** One logical instance owns this directory and key; never share or clone it across live instances. */
 public final class ProviderStateStore implements AutoCloseable {
     private final Path directory, stateFile;
     private final FileChannel lockChannel;

@@ -56,9 +56,6 @@
       "type": "string",
       "maxLength": 128
     },
-    "bootstrapGrant": {
-      "type": "string"
-    },
     "authorization": {
       "type": "object",
       "additionalProperties": false,
@@ -69,8 +66,7 @@
         "scheme": {
           "enum": [
             "anonymous-proof-of-work",
-            "bearer-token",
-            "bootstrap-grant"
+            "bearer-token"
           ]
         }
       }
@@ -117,29 +113,18 @@
       },
       "then": {
         "required": [
-          "placement"
+          "placement",
+          "authorization"
         ],
-        "anyOf": [
-          {
-            "required": [
-              "bootstrapGrant"
-            ]
-          },
-          {
-            "required": [
-              "authorization"
-            ],
+        "properties": {
+          "authorization": {
             "properties": {
-              "authorization": {
-                "properties": {
-                  "scheme": {
-                    "const": "bearer-token"
-                  }
-                }
+              "scheme": {
+                "const": "bearer-token"
               }
             }
           }
-        ]
+        }
       }
     }
   ],
@@ -181,8 +166,7 @@
                   "scheme": {
                     "enum": [
                       "anonymous-proof-of-work",
-                      "bearer-token",
-                      "bootstrap-grant"
+                      "bearer-token"
                     ]
                   },
                   "modes": {
@@ -239,8 +223,7 @@
             "scheme": {
               "enum": [
                 "anonymous-proof-of-work",
-                "bearer-token",
-                "bootstrap-grant"
+                "bearer-token"
               ]
             },
             "reference": {
@@ -339,7 +322,7 @@
     "mode",
     "profile",
     "label",
-    "grantId",
+    "authorizationId",
     "serviceId",
     "region",
     "pool",
