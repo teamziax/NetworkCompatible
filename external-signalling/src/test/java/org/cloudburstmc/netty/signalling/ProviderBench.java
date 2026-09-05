@@ -15,11 +15,11 @@ public final class ProviderBench {
         if (System.getProperty("providerMode", "once").equals("identity")) { try (var store = new ProviderStateStore(state)) { System.out.println(ProviderIdentity.initialize(store, provider)); } return; }
         String token = System.getProperty("providerToken");
         ProviderTransport transport = new ProviderTransport() {
-            String keyId;
+            String keyId; final String incarnation = UUID.randomUUID().toString().replace("-", "");
             public CompletionStage<Void> installTicketKeys(List<TicketKey> keys) { keyId = keys.getLast().keyId(); return CompletableFuture.completedFuture(null); }
             public CompletionStage<JsonObject> hostProfile() {
                 JsonObject p = new JsonObject(); p.addProperty("credentialKeyId", keyId); p.addProperty("dtlsFingerprint", "sha-256 " + String.join(":", Collections.nCopies(32, "11"))); p.addProperty("sctpPort", 5000); p.addProperty("maxMessageSize", 262144);
-                JsonObject c = new JsonObject(); c.addProperty("address", "127.0.0.1"); c.addProperty("port", 19133); c.addProperty("foundation", "fixture"); c.addProperty("component", 1); c.addProperty("priority", 100); c.addProperty("protocol", "udp"); c.addProperty("type", "host"); JsonArray candidates = new JsonArray(); candidates.add(c); p.add("candidates", candidates); return CompletableFuture.completedFuture(p);
+                JsonObject c = new JsonObject(); c.addProperty("address", "127.0.0.1"); c.addProperty("port", 19133); c.addProperty("foundation", "fixture"); c.addProperty("component", 1); c.addProperty("priority", 100); c.addProperty("protocol", "udp"); c.addProperty("type", "host"); JsonArray candidates = new JsonArray(); candidates.add(c); p.add("candidates", candidates); JsonObject capability = new JsonObject(); capability.addProperty("capability", "nethernet.stateless-admission.v1"); capability.addProperty("incarnation", incarnation); p.add("statelessAdmission", capability); return CompletableFuture.completedFuture(p);
             }
             public CompletionStage<ApplyResult> applyControl(JsonObject c) { return CompletableFuture.completedFuture(ApplyResult.REJECTED); }
             public List<JsonObject> pollEvents() { return List.of(); }
@@ -37,8 +37,10 @@ public final class ProviderBench {
         var client = new ProviderClient(config, new ProviderStateStore(state), transport, () -> new ServerStatus("Java bench", 1234, "fixture-only", "Fixture", 2, 50, 0), () -> new ProviderClient.Health(true, 100, 0.02, "nethernet", "java-conformance"), System.err::println);
         try {
             JsonObject registration = client.start().get(30, TimeUnit.SECONDS);
+            String extensionsFile = System.getProperty("providerExtensionsFile");
+            if (extensionsFile != null) ExtensionFixtureFile.write(Path.of(extensionsFile), client.extensions().get(10, TimeUnit.SECONDS));
             System.out.println("instance=" + registration.get("instanceId").getAsString() + " service=" + registration.get("serviceId").getAsString());
-            System.out.println(client.readiness().get(10, TimeUnit.SECONDS));
+            JsonObject readiness = client.readiness().get(10, TimeUnit.SECONDS); readiness.remove("extensions"); System.out.println(readiness);
             long hold = Long.parseLong(System.getProperty("providerHoldSeconds", "0"));
             String stopFile = System.getProperty("providerStopFile");
             if (stopFile != null) { long until = System.currentTimeMillis() + 180000; while (!Files.exists(Path.of(stopFile)) && System.currentTimeMillis() < until) Thread.sleep(100); }

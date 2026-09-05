@@ -95,4 +95,38 @@ class ProviderJourneysTest {
             } finally { instance.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
         }
     }
+
+    @Test void recoversCommittedRegistrationWhenCompletionResponseIsLost(@TempDir Path directory) throws Exception {
+        // Exercise bearer attachment too: a recovery challenge intentionally has neither enrollment
+        // placement nor bearer authorization, while the recovered registration retains both bindings.
+        for (boolean attach : new boolean[]{false, true}) try (IndependentProviderStub stub = new IndependentProviderStub()) {
+            Path statePath = directory.resolve(attach ? "attached" : "standalone");
+            var configuration = new ProviderClient.Configuration(URI.create(stub.origin), "nxs-admission-v1", "Lost completion",
+                attach ? ProviderClient.ATTACH_INSTANCE : ProviderClient.NEW_SERVICE,
+                attach ? ProviderClient.BEARER_TOKEN : ProviderClient.ANONYMOUS_PROOF_OF_WORK,
+                attach ? "independent-provider-token" : null, attach ? "EU" : null, attach ? "proxy" : null,
+                attach ? Map.of("location", "london") : Map.of());
+            stub.loseCompletionResponse = true;
+            ProviderClient first = client(stub, statePath, configuration, new ProviderClientTest.FakeTransport());
+            try { assertThrows(java.util.concurrent.ExecutionException.class, () -> first.start().get(20, TimeUnit.SECONDS)); }
+            finally { first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+            JsonObject before;
+            try (ProviderStateStore state = new ProviderStateStore(statePath)) {
+                before = state.read(); assertTrue(before.has("challenge")); assertFalse(before.has("registration"));
+            }
+            assertEquals(1, stub.registrations, "The provider committed despite the lost HTTP response");
+            ProviderClient resumed = client(stub, statePath, configuration, new ProviderClientTest.FakeTransport());
+            try {
+                JsonObject registration = resumed.start().get(20, TimeUnit.SECONDS);
+                assertEquals(stub.registration.get("registrationId"), registration.get("registrationId"));
+                assertEquals(1, stub.registrations); assertEquals(1, stub.generation);
+                assertTrue(resumed.readiness().get(10, TimeUnit.SECONDS).get("routable").getAsBoolean());
+                assertTrue(stub.keyAcknowledgements > 0, "Lost one-time key material is freshly provisioned");
+            } finally { resumed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+            try (ProviderStateStore state = new ProviderStateStore(statePath)) {
+                JsonObject after = state.read(); assertFalse(after.has("challenge"));
+                assertEquals(before.get("privateKey"), after.get("privateKey"));
+            }
+        }
+    }
 }

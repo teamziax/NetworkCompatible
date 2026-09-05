@@ -38,7 +38,7 @@ tasks.register<JavaExec>("providerBench") {
     dependsOn(tasks.testClasses)
     classpath = sourceSets.test.get().runtimeClasspath
     mainClass.set("org.cloudburstmc.netty.signalling.ProviderBench")
-    listOf("providerOrigin", "providerState", "providerMode", "providerGrantFile", "providerToken", "providerRegistrationMode", "providerRegion", "providerPool", "providerTags", "providerHoldSeconds").forEach { name ->
+    listOf("providerOrigin", "providerState", "providerMode", "providerToken", "providerRegistrationMode", "providerRegion", "providerPool", "providerTags", "providerHoldSeconds", "providerStopFile", "providerExtensionsFile").forEach { name ->
         providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
     }
 }

@@ -50,10 +50,11 @@ public final class ProviderNativeBench {
                 () -> new ServerStatus("Automatic native server", 1234, "fixture-only", "Integration", 0, 4, 0),
                 () -> new ProviderClient.Health(true, 4, 0, "nethernet", "provider-native-bench"), System.err::println);
             JsonObject registration = provider.start().get(45, TimeUnit.SECONDS);
+            if (args.length > 4) ExtensionFixtureFile.write(Path.of(args[4]), provider.extensions().get(10, TimeUnit.SECONDS));
             // Emit assigned IDs only; optional metadata and credentials are excluded.
             emit("registered", Map.of("serviceId", registration.get("serviceId").getAsString(), "instanceId", registration.get("instanceId").getAsString()));
             emit("profile", nativeHost.hostProfile().toCompletableFuture().get());
-            emit("readiness", provider.readiness().get(10, TimeUnit.SECONDS));
+            JsonObject readiness = provider.readiness().get(10, TimeUnit.SECONDS); readiness.remove("extensions"); emit("readiness", readiness);
             long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(3);
             boolean updated = false;
             while (!Files.exists(stop)) {

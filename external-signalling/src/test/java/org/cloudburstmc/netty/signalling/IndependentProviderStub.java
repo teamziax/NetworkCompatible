@@ -15,6 +15,7 @@ public final class IndependentProviderStub implements AutoCloseable {
     final Map<String, JsonObject> challenges = new HashMap<>(), keys = new HashMap<>(), placements = new HashMap<>();
     JsonObject registration; volatile JsonObject lastHeartbeat;
     volatile int failHeartbeats;
+    volatile boolean loseCompletionResponse;
     volatile long checkInMillis;
     volatile int controlPolls;
     final java.util.List<JsonObject> events = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -51,6 +52,7 @@ public final class IndependentProviderStub implements AutoCloseable {
         }
         if (path.equals("/example/challenges") || path.equals("/example/recover")) {
             boolean recovery = path.endsWith("recover");
+            if (!ProviderCrypto.PROTOCOL.equals(body.get("protocol").getAsString()) || !"nxs-admission-v1".equals(body.get("profile").getAsString())) throw new Failure(400, "unsupported_profile");
             if (recovery && (registration == null || !registration.get("registrationId").equals(body.get("registrationId")))) throw new Failure(403, "recovery_unavailable");
             JsonObject key = recovery ? keys.get(registration.get("keyId").getAsString()) : body.getAsJsonObject("publicKeyJwk");
             String authorization = recovery ? "recovery" : body.getAsJsonObject("authorization").get("scheme").getAsString();
@@ -60,7 +62,7 @@ public final class IndependentProviderStub implements AutoCloseable {
                 if (!"Bearer independent-provider-token".equals(challengeAuthorization)) throw new Failure(401, "invalid_bearer_token");
             }
             JsonObject c = new JsonObject(); c.addProperty("protocol", ProviderCrypto.PROTOCOL); c.addProperty("signature", ProviderCrypto.SIGNATURE); c.addProperty("challengeId", UUID.randomUUID().toString()); c.addProperty("audience", origin); c.addProperty("nonce", UUID.randomUUID().toString()); c.addProperty("thumbprint", ProviderCrypto.thumbprint(key)); c.addProperty("expiresAt", System.currentTimeMillis() + 60000); c.addProperty("serverTime", System.currentTimeMillis());
-            JsonObject context = new JsonObject(); for (String f : List.of("label", "authorizationId", "serviceId", "region", "pool", "registrationId")) context.addProperty(f, ""); context.addProperty("mode", recovery ? "recover" : body.get("mode").getAsString()); context.addProperty("profile", "nxs-admission-v1");
+            JsonObject context = new JsonObject(); for (String f : List.of("label", "authorizationId", "serviceId", "region", "pool", "registrationId")) context.addProperty(f, ""); context.addProperty("mode", recovery ? "recover" : body.get("mode").getAsString()); context.addProperty("profile", "nxs-admission-v1"); if (recovery) context.add("registrationId", body.get("registrationId"));
             if (!recovery && authorization.equals("bearer-token")) { context.addProperty("authorizationId", "independent-authority"); JsonObject selected = new JsonObject(); selected.addProperty("scheme", authorization); selected.addProperty("reference", "independent-authority"); c.add("authorization", selected); }
             if (!recovery && body.has("placement")) { JsonObject placement = body.getAsJsonObject("placement"); context.add("region", placement.get("region")); context.add("pool", placement.get("pool")); if (placement.has("tags")) { Map<String, String> tags = new TreeMap<>(); for (var tag : placement.getAsJsonObject("tags").entrySet()) tags.put(tag.getKey(), tag.getValue().getAsString()); context.addProperty("tagsDigest", ProviderCrypto.tagsDigest(tags)); } }
             c.add("context", context); c.addProperty("contextDigest", ProviderCrypto.contextDigest(context)); JsonObject pow = new JsonObject(); pow.addProperty("algorithm", "sha256-leading-zero-bits-v0"); challengeDifficulty = recovery || authorization.equals("bearer-token") ? 0 : 2; pow.addProperty("difficulty", challengeDifficulty); c.add("pow", pow);
@@ -76,14 +78,18 @@ public final class IndependentProviderStub implements AutoCloseable {
             challenges.remove(id);
             if (c.getAsJsonObject("context").get("mode").getAsString().equals("recover")) { JsonObject r = registration.deepCopy(); r.remove("ticketKey"); r.addProperty("leaseGeneration", generation); return r; }
             if (registration != null) throw new Failure(409, "already_registered"); registrations++;
-            registration = new JsonObject(); registration.addProperty("protocol", ProviderCrypto.PROTOCOL); registration.addProperty("provider", origin); registration.addProperty("registrationId", id); registration.addProperty("instanceId", "example-machine-1"); registration.addProperty("serviceId", "example-service-1"); registration.addProperty("keyId", "example-key-1"); registration.addProperty("publicAddress", "https://play.example.invalid"); registration.addProperty("profile", "nxs-admission-v1"); registration.addProperty("leaseGeneration", 0); registration.addProperty("leaseDeadline", 0); registration.addProperty("heartbeatIntervalMs", 1000); JsonObject ready = new JsonObject(); ready.addProperty("routable", false); ready.add("reasons", new JsonArray()); registration.add("readiness", ready); JsonObject place = placements.getOrDefault(id, new JsonObject()).deepCopy(); if (!place.has("region")) place.addProperty("region", ""); if (!place.has("pool")) place.addProperty("pool", ""); registration.add("placement", place); registration.add("ticketKey", ticket()); if (extensionMetadata != null) registration.add("extensions", extensionMetadata.deepCopy()); keys.put("example-key-1", keys.get(id)); return registration.deepCopy();
+            registration = new JsonObject(); registration.addProperty("protocol", ProviderCrypto.PROTOCOL); registration.addProperty("provider", origin); registration.addProperty("registrationId", id); registration.addProperty("instanceId", "example-machine-1"); registration.addProperty("serviceId", "example-service-1"); registration.addProperty("keyId", "example-key-1"); registration.addProperty("publicAddress", "https://play.example.invalid"); registration.addProperty("profile", "nxs-admission-v1"); registration.addProperty("leaseGeneration", 0); registration.addProperty("leaseDeadline", 0); registration.addProperty("heartbeatIntervalMs", 1000); JsonObject ready = new JsonObject(); ready.addProperty("routable", false); ready.add("reasons", new JsonArray()); registration.add("readiness", ready); JsonObject place = placements.getOrDefault(id, new JsonObject()).deepCopy(); if (!place.has("region")) place.addProperty("region", ""); if (!place.has("pool")) place.addProperty("pool", ""); registration.add("placement", place); registration.add("ticketKey", ticket()); if (extensionMetadata != null) registration.add("extensions", extensionMetadata.deepCopy()); keys.put("example-key-1", keys.get(id)); if (loseCompletionResponse) { loseCompletionResponse = false; e.close(); throw new Failure(503, "completion_response_lost"); } return registration.deepCopy();
         }
         if (path.equals("/example/heartbeat") && failHeartbeats-- > 0) throw new Failure(503, "fixture_transient");
         authenticate(e, raw);
         JsonObject ok = new JsonObject(); ok.addProperty("accepted", true);
         switch (path) {
-            case "/example/activate" -> { generation++; sequence = 0; draining = false; ok.addProperty("leaseGeneration", generation); ok.addProperty("leaseDeadline", System.currentTimeMillis() + 30000); }
-            case "/example/host-profile" -> ok.addProperty("revision", "example-profile-revision");
+            case "/example/activate" -> { if (!"nxs-admission-v1".equals(body.get("profile").getAsString())) throw new Failure(400, "unsupported_profile"); generation++; sequence = 0; draining = false; ok.addProperty("leaseGeneration", generation); ok.addProperty("leaseDeadline", System.currentTimeMillis() + 30000); }
+            case "/example/host-profile" -> {
+                if (keyAcknowledgements == 0 || !"nethernet.stateless-admission.v1".equals(body.getAsJsonObject("statelessAdmission").get("capability").getAsString())
+                    || !body.get("dtlsFingerprint").getAsString().matches("sha-256 [0-9A-F]{2}(?::[0-9A-F]{2}){31}")) throw new Failure(400, "invalid_host_profile");
+                ok.addProperty("revision", "example-profile-revision");
+            }
             case "/example/heartbeat" -> { if (draining) throw new Failure(403, "draining"); lastHeartbeat = body; heartbeats++;
                 if (checkInMillis > 0 && body.has("checkInVersion")) {
                     long now = System.currentTimeMillis(); JsonObject schedule = new JsonObject();

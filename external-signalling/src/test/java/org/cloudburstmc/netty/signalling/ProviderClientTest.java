@@ -89,9 +89,11 @@ class ProviderClientTest {
         final CompletableFuture<Void> closed = new CompletableFuture<>();
         final java.util.Queue<JsonObject> events = new java.util.concurrent.ConcurrentLinkedQueue<>();
         volatile int installed, applied, admissions, drains;
-        boolean stateless;
+        boolean stateless = true;
         volatile ApplyResult result = ApplyResult.APPLIED;
-        public CompletionStage<JsonObject> hostProfile() { JsonObject p = new JsonObject(); p.addProperty("credentialKeyId", "T001"); p.addProperty("dtlsFingerprint", "fixture-native-profile"); if (stateless) p.add("statelessAdmission", new JsonObject()); return CompletableFuture.completedFuture(p); }
+        public CompletionStage<JsonObject> hostProfile() { JsonObject p = new JsonObject(); p.addProperty("credentialKeyId", "T001"); p.addProperty("dtlsFingerprint", "sha-256 " + String.join(":", Collections.nCopies(32, "11"))); p.addProperty("sctpPort", 5000); p.addProperty("maxMessageSize", 262144);
+            JsonObject c = new JsonObject(); c.addProperty("foundation", "fixture"); c.addProperty("component", 1); c.addProperty("protocol", "udp"); c.addProperty("priority", 100); c.addProperty("address", "127.0.0.1"); c.addProperty("port", 19133); c.addProperty("type", "host"); JsonArray candidates = new JsonArray(); candidates.add(c); p.add("candidates", candidates);
+            if (stateless) { JsonObject cap = new JsonObject(); cap.addProperty("capability", "nethernet.stateless-admission.v1"); cap.addProperty("incarnation", "0123456789abcdef0123456789abcdef"); p.add("statelessAdmission", cap); } return CompletableFuture.completedFuture(p); }
         public CompletionStage<Void> installTicketKeys(List<TicketKey> keys) { installed = keys.size(); return CompletableFuture.completedFuture(null); }
         public CompletionStage<ApplyResult> applyControl(JsonObject c) {
             applied++; String kind = c.get("kind").getAsString();

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+// Adapted from teamziax/libdatachannel-java at 40f2c329dcb63a762a701b987dc9995d76fd18c7.
+// The original file license is preserved; see LICENSES/MPL-2.0.txt.
 package org.cloudburstmc.netty.signalling.admission;
 
 import tel.schich.libdatachannel.*;

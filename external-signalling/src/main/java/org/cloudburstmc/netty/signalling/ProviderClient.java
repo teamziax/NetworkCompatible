@@ -134,21 +134,42 @@ public final class ProviderClient implements AutoCloseable {
             || limits.get("clockSkewMs").getAsLong() < 0 || limits.get("clockSkewMs").getAsLong() > 60000)
             throw new IOException("Unsupported provider limits");
     }
-    private void recoverExisting() throws Exception {
-        JsonObject recovery = new JsonObject(); recovery.addProperty("registrationId", registration("registrationId"));
+    private JsonObject recoveryRequest(String registrationId) {
+        JsonObject recovery = new JsonObject(); recovery.addProperty("registrationId", registrationId);
         recovery.addProperty("protocol", ProviderCrypto.PROTOCOL); recovery.addProperty("profile", config.profile());
-        JsonObject challenge = unsigned("recover", recovery);
+        return recovery;
+    }
+    private void recoverExisting() throws Exception {
+        String registrationId = registration("registrationId");
+        completeRecovery(unsigned("recover", recoveryRequest(registrationId)), registrationId);
+    }
+    private void completeRecovery(JsonObject challenge, String registrationId) throws Exception {
+        ProviderContract.require("challenge", challenge);
+        JsonObject context = challenge.getAsJsonObject("context");
+        if (!origin.equals(challenge.get("audience").getAsString()) || !ProviderCrypto.PROTOCOL.equals(challenge.get("protocol").getAsString())
+            || !ProviderCrypto.SIGNATURE.equals(challenge.get("signature").getAsString()) || !"recover".equals(context.get("mode").getAsString())
+            || !config.profile().equals(context.get("profile").getAsString()) || !registrationId.equals(context.get("registrationId").getAsString())
+            || !ProviderCrypto.contextDigest(context).equals(challenge.get("contextDigest").getAsString())
+            || challenge.get("expiresAt").getAsLong() <= System.currentTimeMillis()
+            || !"sha256-leading-zero-bits-v0".equals(challenge.getAsJsonObject("pow").get("algorithm").getAsString())
+            || challenge.getAsJsonObject("pow").get("difficulty").getAsInt() != 0)
+            throw new IOException("Unbound recovery challenge");
         String thumbprint = challenge.get("thumbprint").getAsString();
         boolean pending = state.has("pendingPublicKeyJwk") && ProviderCrypto.thumbprint(state.getAsJsonObject("pendingPublicKeyJwk")).equals(thumbprint);
         PrivateKey key = pending ? ProviderCrypto.privateKey(state.get("pendingPrivateKey").getAsString()) : privateKey;
         if (!pending && !ProviderCrypto.thumbprint(state.getAsJsonObject("publicKeyJwk")).equals(thumbprint)) throw new IOException("Recovery key does not match durable state");
-        if (!origin.equals(challenge.get("audience").getAsString()) || !ProviderCrypto.PROTOCOL.equals(challenge.get("protocol").getAsString())) throw new IOException("Recovery audience mismatch");
         String intent = UUID.randomUUID().toString(); JsonObject completion = new JsonObject();
         completion.addProperty("protocol", ProviderCrypto.PROTOCOL); completion.addProperty("challengeId", challenge.get("challengeId").getAsString());
         completion.addProperty("proofNonce", "0"); completion.addProperty("idempotencyKey", intent); completion.addProperty("signature", ProviderCrypto.sign(key, ProviderCrypto.proof(challenge, "0", intent)));
         JsonObject recovered = unsigned("complete", completion); validateRegistration(recovered);
-        registrationExtensions = ProtocolExtensions.copy(recovered); recovered.remove("extensions");
+        if (!registrationId.equals(recovered.get("registrationId").getAsString())) throw new IOException("Recovered registration changed");
+        if (state.has("registration")) for (String field : List.of("instanceId", "serviceId", "registrationId"))
+            if (!state.getAsJsonObject("registration").get(field).equals(recovered.get(field))) throw new IOException("Recovered instance identity changed");
+        registrationExtensions = ProtocolExtensions.copy(recovered); recovered.remove("extensions"); recovered.remove("ticketKey");
         state.add("registration", recovered); state.addProperty("generation", recovered.get("leaseGeneration").getAsLong());
+        if (!state.has("sequence")) state.addProperty("sequence", 0);
+        if (!state.has("ticketKeys")) state.add("ticketKeys", new JsonArray());
+        state.remove("challenge");
         // Sequence is monotonic within a generation; the previous durable reservation is retained.
         if (pending) { state.add("privateKey", state.remove("pendingPrivateKey")); state.add("publicKeyJwk", state.remove("pendingPublicKeyJwk")); privateKey = key; }
         save();
@@ -156,9 +177,12 @@ public final class ProviderClient implements AutoCloseable {
     private void enroll() throws Exception {
         JsonObject challenge;
         if (state.has("challenge")) {
-            JsonObject recovery = new JsonObject(); recovery.addProperty("registrationId", state.getAsJsonObject("challenge").get("challengeId").getAsString());
-            try { challenge = unsigned("recover", recovery); }
-            catch (ProviderException e) { if (e.status != 403) throw e; challenge = state.getAsJsonObject("challenge"); }
+            String registrationId = state.getAsJsonObject("challenge").get("challengeId").getAsString();
+            JsonObject recoveredChallenge = null;
+            try { recoveredChallenge = unsigned("recover", recoveryRequest(registrationId)); }
+            catch (ProviderException e) { if (e.status != 403) throw e; }
+            if (recoveredChallenge != null) { completeRecovery(recoveredChallenge, registrationId); return; }
+            challenge = state.getAsJsonObject("challenge");
         } else {
             JsonObject request = new JsonObject(); request.addProperty("protocol", ProviderCrypto.PROTOCOL); request.addProperty("mode", config.registrationMode());
             request.addProperty("profile", config.profile()); request.add("publicKeyJwk", state.get("publicKeyJwk")); if (config.label() != null) request.addProperty("label", config.label());
@@ -188,7 +212,7 @@ public final class ProviderClient implements AutoCloseable {
         JsonObject registration = unsigned("complete", completion); ProviderContract.require("registration", registration); validateRegistration(registration);
         registrationExtensions = ProtocolExtensions.copy(registration); registration.remove("extensions");
         state.add("registration", registration); state.addProperty("generation", registration.get("leaseGeneration").getAsLong()); state.addProperty("sequence", 0);
-        state.add("ticketKeys", new JsonArray());
+        state.add("ticketKeys", new JsonArray()); state.remove("challenge");
         if (registration.has("ticketKey")) { state.getAsJsonArray("ticketKeys").add(registration.remove("ticketKey")); }
         save();
     }
