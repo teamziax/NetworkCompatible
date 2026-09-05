@@ -4,12 +4,13 @@ dependencies {
     api(libs.bundles.netty)
     api(libs.netty.codec.http)
     api(libs.expiringmap)
-    api(libs.webrtc.java)
+    api(libs.libdatachannel.java)
 
     implementation(libs.gson)
+    implementation(libs.jose4j)
 
     testImplementation(libs.bundles.junit)
-    testRuntimeOnly(libs.junit.platform.launcher) 
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 configure<JavaPluginExtension> {

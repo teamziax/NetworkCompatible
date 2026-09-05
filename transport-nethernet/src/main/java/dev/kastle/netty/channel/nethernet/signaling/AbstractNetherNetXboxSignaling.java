@@ -11,6 +11,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -21,6 +22,7 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketFrameAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -74,7 +76,7 @@ public abstract class AbstractNetherNetXboxSignaling extends SimpleChannelInboun
     }
 
     @Override
-    public void bind(SocketAddress localAddress) throws ConnectException {
+    public void bind(SocketAddress localAddress, EventLoop eventLoop) throws ConnectException {
         try {
             connectInternal().join();
         } catch (Exception e) {
@@ -114,6 +116,7 @@ public abstract class AbstractNetherNetXboxSignaling extends SimpleChannelInboun
                      p.addLast(sslCtx.newHandler(ch.alloc(), uri.getHost(), 443));
                      p.addLast(new HttpClientCodec(), new HttpObjectAggregator(8192));
                      p.addLast("ws-handshake", new WebSocketClientProtocolHandler(handshaker));
+                     p.addLast("ws-aggregator", new WebSocketFrameAggregator(16 * 1024)); // Allow 16KB aggregations
                      p.addLast("handler", AbstractNetherNetXboxSignaling.this);
                  }
              });
