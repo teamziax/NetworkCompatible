@@ -388,11 +388,18 @@ Only a retransmission of the identical token from the same UDP tuple can reuse
 a reservation. Reject the same token from another tuple. Also reject a conflicting
 admission on an occupied tuple.
 
-Limit the number of sessions, pending handshakes, replay-cache entries, callbacks,
-and queued datagrams. Create peers outside the UDP mux callback lock. After
-registering the native peer, deliver or replay the authenticated first datagram
-so that its STUN request receives a response. Release admission capacity only
-after native teardown has actually finished.
+Limit the number of sessions, pending handshakes, used-token records, callbacks,
+and retained requests. Native code retains the first STUN request while the
+application validates its token asynchronously. Duplicate requests for the same
+pending attempt share that decision. The application receives parsed request
+metadata, not packet bytes.
+
+Create peers outside the UDP receive lock and only after native STUN integrity
+verification succeeds. Then process the retained request immediately: completing
+admission MUST NOT depend on the client retransmitting. Established transport
+packets stay native. Release admission capacity only after native teardown has
+actually finished. A failed integrity check MUST NOT consume the token, since a
+copied token alone does not prove that the sender has its ICE password.
 
 ## Optional extensions and compatibility
 
