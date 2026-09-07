@@ -51,3 +51,17 @@ const provenance = {specification:'urn:nethernet:external-signalling:v1', files:
 if (update) write('provenance.json',provenance);
 assert.deepEqual(read('provenance.json'),provenance);
 console.log('NXS canonical signing, stateless encryption, and fixture hashes verified.');
+
+// Fleet examples keep public endpoint metadata optional and runtime counts independent.
+const schema = read('nxs-v1.schema.json');
+for (const [document, value] of Object.entries(f.fleetExamples)) {
+  for (const field of schema.$defs[document].required) assert(field in value, document + ' omitted ' + field);
+}
+assert(!schema.$defs.registration.required.includes('serviceId'));
+assert(!schema.$defs.registration.required.includes('publicAddress'));
+assert(!('serviceId' in f.fleetExamples.registration));
+assert(!('publicAddress' in f.fleetExamples.registration));
+assert.equal(schema.$defs.heartbeat.properties.playerCount.$ref, '#/$defs/playerCount');
+assert.equal(f.fleetExamples.heartbeat.playerCount.connectedPlayers, 3);
+assert.equal(f.fleetExamples.heartbeat.serverStatus.players, 25000);
+assert(f.fleetExamples.heartbeat.playerCount.sampledAt <= f.fleetExamples.heartbeat.clockUnixMillis);
