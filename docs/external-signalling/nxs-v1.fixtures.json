@@ -112,12 +112,12 @@
       },
       "serverStatus": {
         "name": "Network listing",
-        "networkId": 1234,
-        "levelName": "world",
         "version": "fixture",
         "players": 25000,
         "maxPlayers": 30000,
-        "gameType": 0
+        "gameType": 0,
+        "protocol": 1234,
+        "level": "world"
       }
     }
   }
