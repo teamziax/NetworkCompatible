@@ -1,0 +1,32 @@
+description = "NetherNet transport for Netty"
+
+dependencies {
+    api(libs.bundles.netty)
+    api(libs.netty.codec.http)
+    api(libs.expiringmap)
+    api("${rootProject.property("nativeJavaGroup")}:libdatachannel-java:${rootProject.property("nativeJavaVersion")}")
+    testRuntimeOnly("${rootProject.property("nativeJavaGroup")}:libdatachannel-java:${rootProject.property("nativeJavaVersion")}:x86_64")
+
+    implementation(libs.gson)
+    implementation(libs.jose4j)
+
+    testImplementation(libs.bundles.junit)
+    testRuntimeOnly(libs.junit.platform.launcher)
+}
+
+configure<JavaPluginExtension> {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
+    withJavadocJar()
+    withSourcesJar()
+}
+
+tasks.jar {
+    manifest.attributes["Automatic-Module-Name"] = "dev.kastle.netty.transport.nethernet"
+}
+
+tasks.register<JavaExec>("runDiscovery") {
+    mainClass.set("dev.kastle.netty.util.nethernet.NetherNetScanner") 
+    classpath = sourceSets["main"].runtimeClasspath 
+}
